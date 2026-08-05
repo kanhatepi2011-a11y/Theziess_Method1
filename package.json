@@ -12,8 +12,6 @@
     "cleanup-api": "node scripts/cleanup-vercel-functions.mjs"
   },
   "dependencies": {
-    "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2",
     "jose": "^6.2.4",
     "pg": "^8.16.3"
   },

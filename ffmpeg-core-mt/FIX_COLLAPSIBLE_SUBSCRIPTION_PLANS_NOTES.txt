@@ -1,9 +1,0 @@
-THEZIESS METHOD — COLLAPSIBLE SUBSCRIPTION PLANS FIX
-
-Changes:
-- Subscription cards are no longer always visible.
-- The plan drawer now sits directly below the clickable “No active subscription…” message.
-- Clicking the message toggles FREE, PRO, PREMIUM, and MAX plans.
-- Added a close button to hide the plan drawer.
-- Profile “View Plans” and subscription-required actions still open the same drawer.
-- The drawer closes automatically after a plan is activated.

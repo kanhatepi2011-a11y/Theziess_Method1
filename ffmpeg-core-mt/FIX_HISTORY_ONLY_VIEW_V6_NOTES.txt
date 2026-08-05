@@ -1,7 +1,0 @@
-FIX V6 — HISTORY ONLY IN HISTORY TAB
-
-Changes:
-- The history card is hidden by default in the Compress view.
-- Clicking History renders and displays the saved compression history.
-- Clicking Compress hides the history card again.
-- History data, download actions, delete actions, badge count, and clear-history behavior are unchanged.

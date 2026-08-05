@@ -3415,3 +3415,204 @@ body[data-app-view="check"] .panel-right {
     display: none;
   }
 }
+
+
+/* V24: premium subscription-card visual refresh */
+.plan-grid {
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.plan-card {
+  min-height: 178px;
+  padding: 26px 28px;
+  border-radius: 24px;
+  border: 1px dashed rgba(192, 132, 252, .48);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(168, 85, 247, .12), transparent 38%),
+    linear-gradient(145deg, rgba(28, 15, 51, .98), rgba(13, 8, 27, .98));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 14px 40px rgba(3, 0, 12, .24);
+  gap: 13px;
+  overflow: hidden;
+}
+
+.plan-card.admin-only {
+  border-style: dashed;
+  background:
+    radial-gradient(circle at 88% 12%, rgba(168, 85, 247, .12), transparent 38%),
+    linear-gradient(145deg, rgba(28, 15, 51, .98), rgba(13, 8, 27, .98));
+}
+
+.plan-card:hover,
+.plan-card.current,
+.plan-card.admin-only:not(.current):hover {
+  transform: translateY(-2px);
+  border-color: rgba(192, 132, 252, .86);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(168, 85, 247, .18), transparent 40%),
+    linear-gradient(145deg, rgba(34, 17, 61, .99), rgba(15, 8, 29, .99));
+  box-shadow: 0 0 0 1px rgba(168,85,247,.12), 0 18px 46px rgba(76, 29, 149, .18);
+}
+
+.plan-card strong {
+  font-size: clamp(48px, 8vw, 62px);
+  line-height: .95;
+  letter-spacing: -0.045em;
+  text-shadow: 0 4px 18px rgba(0,0,0,.28);
+}
+
+.plan-card small,
+.plan-card.admin-only small {
+  color: #c4a7e7;
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.plan-name {
+  color: #d8b4fe;
+  font: 800 18px "JetBrains Mono", monospace;
+  letter-spacing: .02em;
+}
+
+.plan-free {
+  border-style: solid;
+  border-color: rgba(56, 189, 248, .56);
+  background:
+    radial-gradient(circle at 86% 10%, rgba(14,165,233,.16), transparent 38%),
+    linear-gradient(145deg, rgba(24, 28, 72, .96), rgba(20, 13, 52, .98));
+  box-shadow: inset 0 0 24px rgba(59,130,246,.06), 0 12px 34px rgba(0,0,0,.24);
+}
+
+.plan-chip {
+  right: 22px;
+  top: 22px;
+  padding: 7px 12px;
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+.plan-tier-badge {
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  min-width: 94px;
+  padding: 7px 14px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  font-size: 25px;
+  letter-spacing: -.02em;
+  border-radius: 12px;
+  user-select: none;
+}
+
+.plan-tier-pro {
+  color: #ffe276;
+  border: 2px solid #f8cf4c;
+  background: linear-gradient(180deg, #18130a, #050505);
+  box-shadow: inset 0 0 0 1px rgba(255,244,174,.24), 0 0 18px rgba(250,204,21,.18);
+  text-shadow: 0 1px 0 #000;
+}
+
+.plan-tier-premium {
+  min-width: 142px;
+  color: #2b1600;
+  border: 3px double #f7d55b;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff3a3 0%, #e3a92f 48%, #fff0a0 100%);
+  box-shadow: inset 0 0 0 2px rgba(91,47,0,.48), 0 0 18px rgba(250,204,21,.17);
+  text-shadow: 0 1px 0 rgba(255,255,255,.5);
+}
+
+.plan-tier-max {
+  min-width: 112px;
+  color: #fff;
+  border: 2px solid rgba(255,255,255,.92);
+  background: linear-gradient(120deg, #7c22e8, #d72dff 42%, #177fe8 100%);
+  box-shadow: inset 0 0 8px rgba(255,255,255,.72), 0 0 16px rgba(192,38,255,.5), 0 0 24px rgba(34,211,238,.3);
+  font-style: italic;
+  text-shadow: 0 2px 3px rgba(28,0,57,.8);
+}
+
+@media (max-width: 520px) {
+  .subscription-inline { padding: 14px; }
+  .plan-card { min-height: 160px; padding: 22px 20px; }
+  .plan-card strong { font-size: 52px; }
+  .plan-card small,
+  .plan-card.admin-only small { font-size: 15px; padding-right: 4px; }
+  .plan-name { font-size: 16px; }
+  .plan-tier-badge { right: 17px; top: 18px; transform: scale(.88); transform-origin: top right; }
+  .plan-chip { right: 16px; top: 17px; }
+}
+
+
+
+/* V25: compact subscription plans live only inside Profile modal */
+.profile-plans-panel {
+  margin-top: 4px;
+  padding: 12px;
+  gap: 12px;
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(28, 12, 48, .96), rgba(11, 6, 22, .98));
+  box-shadow: none;
+}
+.profile-plans-panel .subscription-heading { gap: 10px; }
+.profile-plans-panel .subscription-heading h2 { font-size: 16px; margin: 3px 0; }
+.profile-plans-panel .subscription-heading p { font-size: 10px; line-height: 1.45; }
+.profile-plans-panel .subscription-status { padding: 6px 8px; font-size: 9px; }
+.profile-plans-panel .subscription-close-btn { width: 30px; height: 30px; }
+.profile-plans-panel .plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.profile-plans-panel .plan-card,
+.profile-plans-panel .plan-card.admin-only {
+  min-height: 112px;
+  padding: 13px;
+  border-radius: 14px;
+  gap: 4px;
+}
+.profile-plans-panel .plan-card strong { font-size: 34px; line-height: 1; }
+.profile-plans-panel .plan-card small,
+.profile-plans-panel .plan-card.admin-only small { font-size: 10px; line-height: 1.35; padding-right: 0; }
+.profile-plans-panel .plan-name { font-size: 11px; }
+.profile-plans-panel .plan-tier-badge { right: 10px; top: 10px; transform: scale(.62); transform-origin: top right; }
+.profile-plans-panel .plan-chip { right: 9px; top: 9px; padding: 3px 6px; font-size: 7px; }
+.profile-modal-card { max-width: 560px; }
+.profile-modal-body { max-height: 72vh; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 520px) {
+  .profile-plans-panel .plan-grid { grid-template-columns: 1fr 1fr; }
+  .profile-plans-panel .plan-card,
+  .profile-plans-panel .plan-card.admin-only { min-height: 102px; padding: 11px; }
+  .profile-plans-panel .plan-card strong { font-size: 30px; }
+  .profile-plans-panel .plan-tier-badge { transform: scale(.54); }
+}
+
+
+/* Profile plans visibility fix */
+.profile-plans-inline-button {
+  width: 100%;
+  margin-top: 14px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(192,132,252,.55);
+  background: linear-gradient(135deg, rgba(14,165,233,.26), rgba(124,58,237,.72));
+  color: #fff;
+  font-weight: 800;
+}
+.profile-plans-inline-button[hidden] { display: none !important; }
+.profile-plans-panel:not([hidden]) { margin-top: 16px; }
+
+
+/* V26: profile plans click/visibility reliability */
+#profileModal .profile-modal-body { scroll-behavior: smooth; }
+#profileModal #subscriptionPanel:not([hidden]) {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+#profilePlansInlineBtn { touch-action: manipulation; cursor: pointer; }

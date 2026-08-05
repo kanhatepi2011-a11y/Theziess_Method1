@@ -60,8 +60,6 @@
   <script type="importmap">
     {
       "imports": {
-        "@ffmpeg/util": "https://esm.sh/@ffmpeg/util@0.12.2",
-        "@ffmpeg/ffmpeg": "https://esm.sh/@ffmpeg/ffmpeg@0.12.15"
       }
     }
   </script>
@@ -177,60 +175,6 @@
     </header>
 
     <main class="container">
-      <!--
-        Hidden controls keep compatibility with the existing app.js
-        while the visible 60 FPS settings card remains removed.
-      -->
-      <div
-        class="vfi-compatibility-controls"
-        aria-hidden="true"
-        hidden
-        style="
-          display: none !important;
-          visibility: hidden !important;
-          position: absolute !important;
-          width: 0 !important;
-          height: 0 !important;
-          overflow: hidden !important;
-          pointer-events: none !important;
-        "
-      >
-        <input
-          type="checkbox"
-          id="enableInterpolation"
-          tabindex="-1"
-          hidden
-        >
-
-        <div
-          id="vfiResolutionBox"
-          style="display: none"
-        >
-          <label
-            for="outputResolution"
-            hidden
-          >
-            Output resolution
-          </label>
-
-          <select
-            id="outputResolution"
-            tabindex="-1"
-          >
-            <option
-              value="1080"
-              selected
-            >
-              1080p
-            </option>
-
-            <option value="1440">
-              2K (1440p)
-            </option>
-          </select>
-        </div>
-      </div>
-
       <section class="panel panel-right">
         <div
           class="drop-zone"
@@ -306,98 +250,6 @@
             >
               Login with Telegram, then activate a subscription plan to compress videos.
             </button>
-
-            <section
-              class="subscription-panel subscription-inline"
-              id="subscriptionPanel"
-              aria-labelledby="subscriptionTitle"
-              aria-hidden="true"
-              hidden
-            >
-              <div class="subscription-heading">
-                <div>
-                  <div class="subscription-eyebrow">
-                    CHOOSE A SUBSCRIPTION
-                  </div>
-
-                  <h2 id="subscriptionTitle">
-                    ជ្រើសរើសគម្រោងដើម្បី Compress វីដេអូ
-                  </h2>
-
-                  <p>
-                    FREE trial អ្នកប្រើអាចចាប់ផ្តើមបានម្តង។ PRO, PREMIUM និង MAX មិនអាច Claim Free បានទេ—Admin ត្រូវ Assign តាម Telegram Bot។
-                  </p>
-                </div>
-
-                <div class="subscription-heading-actions">
-                  <span
-                    class="subscription-status"
-                    id="subscriptionStatus"
-                  >
-                    No active plan
-                  </span>
-
-                  <button
-                    type="button"
-                    class="subscription-close-btn"
-                    id="closeSubscriptionPlansBtn"
-                    aria-label="Hide subscription plans"
-                    title="Hide plans"
-                  >
-                    <i class="ri-close-line" aria-hidden="true"></i>
-                  </button>
-                </div>
-              </div>
-
-              <div class="plan-grid">
-                <button
-                  type="button"
-                  class="plan-card plan-free"
-                  data-plan="free"
-                >
-                  <span class="plan-chip plan-chip-free">
-                    3-DAY TRIAL
-                  </span>
-
-                  <span class="plan-name">FREE</span>
-                  <strong>$0</strong>
-                  <small>3 days · one time</small>
-                </button>
-
-                <button
-                  type="button"
-                  class="plan-card admin-only"
-                  data-plan="pro"
-                >
-                  <span class="plan-chip plan-chip-admin">ADMIN ONLY</span>
-                  <span class="plan-name">PRO</span>
-                  <strong>$2</strong>
-                  <small>30 days · admin activation</small>
-                </button>
-
-                <button
-                  type="button"
-                  class="plan-card plan-featured admin-only"
-                  data-plan="premium"
-                >
-                  <span class="plan-chip plan-chip-admin">ADMIN ONLY</span>
-                  <span class="plan-name">PREMIUM</span>
-                  <strong>$5</strong>
-                  <small>180 days · admin activation</small>
-                </button>
-
-                <button
-                  type="button"
-                  class="plan-card admin-only"
-                  data-plan="max"
-                >
-                  <span class="plan-chip plan-chip-admin">ADMIN ONLY</span>
-                  <span class="plan-name">MAX</span>
-                  <strong>$10</strong>
-                  <small>1 year · admin activation</small>
-                </button>
-              </div>
-            </section>
 
             <a
               class="btn btn-tiktok"
@@ -713,7 +565,7 @@
           <path d="M8.6 17.2 12 13.8l3.4 3.4"></path>
         </svg>
       </span>
-      <span>Compress</span>
+      <span>Patch</span>
     </button>
 
     <button
@@ -1040,6 +892,7 @@
   </div>
 
 
+
   <!-- Telegram profile and subscription modal -->
   <div
     class="modal-overlay"
@@ -1160,7 +1013,110 @@
           <p id="profilePlanDescription">
             Start the FREE 3-day trial yourself. PRO, PREMIUM, and MAX must be assigned by an administrator.
           </p>
+
+          <button
+            type="button"
+            class="modal-btn profile-plans-button profile-plans-inline-button"
+            id="profilePlansInlineBtn"
+            onclick="window.openSubscriptionPlans?.(event)"
+          >
+            <i class="ri-vip-crown-2-line" aria-hidden="true"></i>
+            View Subscription Plans
+          </button>
         </section>
+
+        <section
+          class="subscription-panel subscription-inline profile-plans-panel"
+          id="subscriptionPanel"
+          aria-labelledby="subscriptionTitle"
+          aria-hidden="true"
+          hidden
+        >
+          <div class="subscription-heading">
+            <div>
+              <div class="subscription-eyebrow">
+                CHOOSE A SUBSCRIPTION
+              </div>
+
+              <h2 id="subscriptionTitle">
+                ជ្រើសរើសគម្រោងដើម្បី Compress វីដេអូ
+              </h2>
+
+              <p>
+                FREE trial អ្នកប្រើអាចចាប់ផ្តើមបានម្តង។ PRO, PREMIUM និង MAX មិនអាច Claim Free បានទេ—Admin ត្រូវ Assign តាម Telegram Bot។
+              </p>
+            </div>
+
+            <div class="subscription-heading-actions">
+              <span
+                class="subscription-status"
+                id="subscriptionStatus"
+              >
+                No active plan
+              </span>
+
+              <button
+                type="button"
+                class="subscription-close-btn"
+                id="closeSubscriptionPlansBtn"
+                aria-label="Hide subscription plans"
+                title="Hide plans"
+              >
+                <i class="ri-close-line" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="plan-grid">
+            <button
+              type="button"
+              class="plan-card plan-free"
+              data-plan="free"
+        >
+              <span class="plan-chip plan-chip-free">
+                3-DAY TRIAL
+              </span>
+
+              <span class="plan-name">FREE</span>
+              <strong>$0</strong>
+              <small>3 days · one time</small>
+            </button>
+
+            <button
+              type="button"
+              class="plan-card admin-only"
+              data-plan="pro"
+        >
+              <span class="plan-tier-badge plan-tier-pro" aria-label="Pro plan">Pro</span>
+              <span class="plan-name">PRO</span>
+              <strong>$3</strong>
+              <small>30 days · admin activation</small>
+            </button>
+
+            <button
+              type="button"
+              class="plan-card plan-featured admin-only"
+              data-plan="premium"
+        >
+              <span class="plan-tier-badge plan-tier-premium" aria-label="Premium plan">Premium</span>
+              <span class="plan-name">PREMIUM</span>
+              <strong>$5</strong>
+              <small>180 days · admin activation</small>
+            </button>
+
+            <button
+              type="button"
+              class="plan-card admin-only"
+              data-plan="max"
+        >
+              <span class="plan-tier-badge plan-tier-max" aria-label="Max plan">Max</span>
+              <span class="plan-name">MAX</span>
+              <strong>$10</strong>
+              <small>1 year · admin activation</small>
+            </button>
+          </div>
+            </section>
+
       </div>
 
       <div class="modal-actions profile-modal-actions">
@@ -1177,6 +1133,7 @@
           type="button"
           class="modal-btn profile-plans-button"
           id="profilePlansBtn"
+          onclick="window.openSubscriptionPlans?.(event)"
         >
           <i class="ri-vip-crown-2-line" aria-hidden="true"></i>
           View Plans
@@ -1390,7 +1347,7 @@
     </div>
   </div>
 
-  <!-- Subscription access lock -->
+  <!-- Telegram login access lock -->
   <div
     class="access-lock"
     id="accessLock"
@@ -1408,7 +1365,7 @@
 
       <span>
         Connect your Telegram account to use
-        the video compressor.
+        the video patcher.
       </span>
 
       <button
@@ -1422,7 +1379,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260729-tiktok-posting-v20"
+    src="app.js?v=20260806-co64-login-v1"
   ></script>
 </body>
 </html>

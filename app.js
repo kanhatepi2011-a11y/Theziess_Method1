@@ -13,8 +13,7 @@ import {
     updateBoxSize,
     updateChunkOffsets,
 } from "./src/mp4-boxes.mjs";
-import { inflateSampleTableVideo } from "./src/mp4-inflate.mjs";
-import { normalizeContainer } from "./src/mp4-normalize.mjs";
+import { patchAudioInflationInWorker } from "./src/mp4-patcher-client.mjs";
 import {
     formatRealFps,
     inspectMp4ForTikTok,
@@ -33,6 +32,7 @@ const PATCH_INTERVAL_MS = 600;
 const MOBILE_SCROLL_DELAY_MS = 150;
 const DOWNLOAD_ANCHOR_CLEANUP_MS = 100;
 const SAFE_THUMBNAIL_PREFIX = "data:image/jpeg;base64,";
+const LOCAL_STANDALONE_MODE = false;
 const TELEGRAM_USER_STORAGE_KEY = "theziess.telegram.user";
 const TELEGRAM_CONNECTED_AT_KEY = "theziess.telegram.connectedAt";
 const TELEGRAM_FALLBACK_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
@@ -215,7 +215,7 @@ let tiktokUploadPreviewUrl = null;
 
 const PLANS = {
     free: { id: "free", name: "FREE", price: "$0", durationLabel: "3 days", days: 3, adminOnly: false },
-    pro: { id: "pro", name: "PRO", price: "$2", durationLabel: "30 days", days: 30, adminOnly: true },
+    pro: { id: "pro", name: "PRO", price: "$3", durationLabel: "30 days", days: 30, adminOnly: true },
     premium: { id: "premium", name: "PREMIUM", price: "$5", durationLabel: "180 days", days: 180, adminOnly: true },
     max: { id: "max", name: "MAX", price: "$10", durationLabel: "1 year", days: 365, adminOnly: true },
 };
@@ -383,9 +383,12 @@ function updateTelegramProfileUI(loggedIn, active) {
     const profileLoginBtn = document.getElementById("profileLoginBtn");
     const profilePlansBtn = document.getElementById("profilePlansBtn");
     const profileLogoutBtn = document.getElementById("profileLogoutBtn");
-    if (profileLoginBtn) profileLoginBtn.hidden = loggedIn;
-    if (profilePlansBtn) profilePlansBtn.hidden = !loggedIn;
-    if (profileLogoutBtn) profileLogoutBtn.hidden = !loggedIn;
+    if (profileLoginBtn) profileLoginBtn.hidden = LOCAL_STANDALONE_MODE || loggedIn;
+    if (profilePlansBtn) profilePlansBtn.hidden = LOCAL_STANDALONE_MODE || !loggedIn;
+    if (profileLogoutBtn) profileLogoutBtn.hidden = LOCAL_STANDALONE_MODE || !loggedIn;
+
+    const profilePlansInlineBtn = document.getElementById("profilePlansInlineBtn");
+    if (profilePlansInlineBtn) profilePlansInlineBtn.hidden = false;
 }
 
 function openModal(id) { document.getElementById(id)?.classList.add("active"); }
@@ -443,7 +446,7 @@ function setSubscriptionPlansOpen(open, { scroll = true } = {}) {
 }
 
 function showSubscriptionPlans() {
-    closeModal("profileModal");
+    openModal("profileModal");
     setSubscriptionPlansOpen(true);
 }
 
@@ -458,6 +461,37 @@ function toggleSubscriptionPlans() {
 }
 
 function updateAccessUI() {
+    if (LOCAL_STANDALONE_MODE) {
+        document.body.classList.add("access-granted");
+        const lock = document.getElementById("accessLock");
+        if (lock) lock.hidden = true;
+        const loginBtn = document.getElementById("telegramLoginBtn");
+        const logoutBtn = document.getElementById("logoutBtn");
+        const accountCard = document.getElementById("telegramAccountCard");
+        const subscriptionPanel = document.getElementById("subscriptionPanel");
+        const subscriptionStatus = document.getElementById("subscriptionStatus");
+        if (loginBtn) loginBtn.hidden = true;
+        if (logoutBtn) logoutBtn.hidden = true;
+        if (accountCard) accountCard.hidden = true;
+        if (subscriptionPanel) {
+            subscriptionPanel.hidden = true;
+            subscriptionPanel.setAttribute("aria-hidden", "true");
+        }
+        const accessHint = document.getElementById("patchAccessHint");
+        if (accessHint) {
+            accessHint.hidden = true;
+            accessHint.setAttribute("aria-expanded", "false");
+        }
+        if (subscriptionStatus) {
+            subscriptionStatus.textContent = "Test mode — unlocked";
+            subscriptionStatus.classList.add("active");
+            subscriptionStatus.classList.remove("required");
+        }
+        updateTikTokAccountUI();
+        updatePatchButton();
+        return;
+    }
+
     const loggedIn = !!currentUser;
     const active = hasActiveSubscription();
     const accountLabel = document.getElementById("accountLabel");
@@ -465,9 +499,13 @@ function updateAccessUI() {
     const logoutBtn = document.getElementById("logoutBtn");
     const subscriptionStatus = document.getElementById("subscriptionStatus");
     const lock = document.getElementById("accessLock");
-    if (accountLabel) accountLabel.textContent = loggedIn ? `@${currentUser.username || currentUser.first_name || "telegram_user"}` : "មិនទាន់ចូលគណនី";
-    if (loginBtn) loginBtn.hidden = loggedIn;
-    if (logoutBtn) logoutBtn.hidden = !loggedIn;
+    if (accountLabel) accountLabel.textContent = LOCAL_STANDALONE_MODE
+        ? "Local mode"
+        : loggedIn
+          ? `@${currentUser?.username || currentUser?.first_name || "telegram_user"}`
+          : "មិនទាន់ចូលគណនី";
+    if (loginBtn) loginBtn.hidden = LOCAL_STANDALONE_MODE || loggedIn;
+    if (logoutBtn) logoutBtn.hidden = LOCAL_STANDALONE_MODE || !loggedIn;
     if (subscriptionStatus) {
         subscriptionStatus.textContent = active
             ? formatSubscriptionExpiry(currentSubscription)
@@ -498,14 +536,15 @@ function updateAccessUI() {
 
     // Telegram login unlocks the account area, but video compression requires
     // a currently active subscription. The full-page lock remains login-only.
-    document.body.classList.toggle("access-granted", loggedIn);
-    if (lock) lock.hidden = loggedIn;
+    document.body.classList.toggle("access-granted", true);
+    if (lock) lock.hidden = true;
     updateTelegramProfileUI(loggedIn, active);
     updateTikTokAccountUI();
     updatePatchButton();
 }
 
 function requireLogin() {
+    if (LOCAL_STANDALONE_MODE) return true;
     if (currentUser) return true;
     openModal("telegramModal");
     updateAccessUI();
@@ -513,6 +552,7 @@ function requireLogin() {
 }
 
 function requireActiveSubscription({ focusPlans = true } = {}) {
+    if (LOCAL_STANDALONE_MODE) return true;
     if (!requireLogin()) return false;
     if (hasActiveSubscription()) return true;
 
@@ -682,7 +722,7 @@ async function initializeMembership() {
     });
     document.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", () => closeModal(button.dataset.closeModal)));
     document.querySelectorAll(".plan-card").forEach((card) => card.addEventListener("click", () => {
-        if (!currentUser) { openModal("telegramModal"); return; }
+        if (!LOCAL_STANDALONE_MODE && !currentUser) { openModal("telegramModal"); return; }
         pendingPlan = PLANS[card.dataset.plan];
         if (!pendingPlan) return;
         configurePlanActivationModal(pendingPlan);
@@ -816,13 +856,16 @@ async function initializeMembership() {
         }
     });
     document.getElementById("patchAccessHint")?.addEventListener("click", () => {
+        if (LOCAL_STANDALONE_MODE) return;
         if (!currentUser) {
             openModal("telegramModal");
             return;
         }
         toggleSubscriptionPlans();
     });
-    document.getElementById("lockActionBtn")?.addEventListener("click", () => openModal("telegramModal"));
+    document.getElementById("lockActionBtn")?.addEventListener("click", () => {
+        if (!LOCAL_STANDALONE_MODE) openModal("telegramModal");
+    });
 
     // When an administrator grants or revokes a plan while this page is open,
     // refresh access automatically when the user returns to the tab/window.
@@ -1211,12 +1254,39 @@ function initializeBottomNavigation() {
         openModal("telegramModal");
     });
 
-    document.getElementById("profilePlansBtn")?.addEventListener("click", () => {
-        closeModal("profileModal");
-        setPrimaryAppView("compress");
-        setActiveNavigation("compress");
-        showSubscriptionPlans();
+    const openProfilePlans = (event) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        setActiveNavigation("profile");
+        const panel = document.getElementById("subscriptionPanel");
+        const body = document.querySelector("#profileModal .profile-modal-body");
+        if (!panel) return;
+
+        // Force visibility even if a stale stylesheet or cached [hidden] rule is active.
+        panel.hidden = false;
+        panel.removeAttribute("hidden");
+        panel.setAttribute("aria-hidden", "false");
+        panel.style.display = "block";
+        panel.classList.add("plans-reveal");
+
+        window.setTimeout(() => {
+            if (body) {
+                body.scrollTo({ top: panel.offsetTop - 12, behavior: "smooth" });
+            } else {
+                panel.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        }, 80);
+    };
+
+    // Direct listeners plus delegated fallback for mobile browsers/cached DOM.
+    document.getElementById("profilePlansBtn")?.addEventListener("click", openProfilePlans);
+    document.getElementById("profilePlansInlineBtn")?.addEventListener("click", openProfilePlans);
+    document.addEventListener("click", (event) => {
+        const trigger = event.target.closest?.("#profilePlansBtn, #profilePlansInlineBtn");
+        if (trigger) openProfilePlans(event);
     });
+
+    window.openSubscriptionPlans = openProfilePlans;
 
     document.getElementById("profileLogoutBtn")?.addEventListener("click", () => {
         closeModal("profileModal");
@@ -2239,7 +2309,7 @@ function updatePatchButton() {
     const label = patchBtn.querySelector("span");
     const hint = document.getElementById("patchAccessHint");
 
-    if (!currentUser) {
+    if (!LOCAL_STANDALONE_MODE && !currentUser) {
         patchBtn.disabled = true;
         patchBtn.dataset.accessState = "login-required";
         patchBtn.title = "Login with Telegram before compressing a video.";
@@ -2254,7 +2324,7 @@ function updatePatchButton() {
         return;
     }
 
-    if (!hasActiveSubscription()) {
+    if (!LOCAL_STANDALONE_MODE && !hasActiveSubscription()) {
         patchBtn.disabled = true;
         patchBtn.dataset.accessState = "subscription-required";
         patchBtn.title = "Activate FREE, PRO, PREMIUM, or MAX to unlock video compression.";
@@ -2459,400 +2529,50 @@ function getVideoDurationAndResolution(file) {
     });
 }
 
-let ffmpegInstance = null;
-
-async function destroyFFmpegInstance() {
-    if (!ffmpegInstance) return;
-    try {
-        await ffmpegInstance.terminate();
-    } catch (err) {
-        console.error("FFmpeg terminate failed:", err);
-    }
-    ffmpegInstance = null;
-}
-
-async function getFFmpeg() {
-    if (ffmpegInstance) return ffmpegInstance;
-
-    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-
-    ffmpegInstance = new FFmpeg();
-    logMessage("Loading VFI engine...", "info");
-    const isMultiThread =
-        typeof window.SharedArrayBuffer !== "undefined" &&
-        window.crossOriginIsolated;
-    const repoBase =
-        location.pathname.substring(0, location.pathname.lastIndexOf("/") + 1) ||
-        "/";
-    const absBase = new URL(repoBase, location.href).href;
-    const baseURL = `${absBase}${isMultiThread ? "ffmpeg-core-mt" : "ffmpeg-core"}`;
-    ffmpegInstance.on("progress", ({ progress }) => {
-        setProgress(Math.round(progress * 100));
-    });
-    try {
-        const loadConfig = {
-            coreURL: `${baseURL}/ffmpeg-core.js`,
-            wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-            classWorkerURL: `${absBase}ffmpeg-worker/worker.js`,
-        };
-        if (isMultiThread) {
-            loadConfig.workerURL = `${baseURL}/ffmpeg-core.worker.js`;
-        }
-        await ffmpegInstance.load(loadConfig);
-        logMessage("VFI engine loaded successfully.", "success");
-    } catch (err) {
-        await destroyFFmpegInstance();
-        throw err;
-    }
-    return ffmpegInstance;
-}
-
-function resolveInputExtension(file) {
-    const lower = file.name.toLowerCase();
-    if (lower.endsWith(".mov")) return ".mov";
-    if (lower.endsWith(".webm")) return ".webm";
-    return ".mp4";
-}
-
-async function runVFI(file, width, height, targetRes = 1080) {
-    const { fetchFile } = await import("@ffmpeg/util");
-
-    let instance;
-    try {
-        if (isCancelled) throw new Error("Cancelled");
-        instance = await getFFmpeg();
-        if (isCancelled) throw new Error("Cancelled");
-        const ext = resolveInputExtension(file);
-        const inputName = `input${ext}`;
-        const outputName = "output.mp4";
-
-        logMessage("Preparing video data streams...", "info");
-        await instance.writeFile(inputName, await fetchFile(file));
-        if (isCancelled) throw new Error("Cancelled");
-
-        const isMultiThread =
-            typeof window.SharedArrayBuffer !== "undefined" &&
-            window.crossOriginIsolated;
-        const threads = Math.max(1, Math.floor((navigator.hardwareConcurrency || 4) / 2));
-        if (!isMultiThread) {
-            logMessage(
-                "Notice: Single-threaded mode active. Enable HTTPS/cross-origin isolation for faster processing.",
-                "warning",
-            );
-        }
-
-        const vfiRes = Math.min(targetRes, 1080);
-        const meMode = isMobileDevice() ? "bidir" : "bilat";
-        const buildFilter = () => {
-            let f =
-                `mpdecimate,minterpolate=fps=60:mi_mode=mci:me_mode=${meMode}:me=epzs:search_param=4:scd=none`;
-            if (width > height) {
-                f = `scale=-2:${vfiRes},${f}`;
-            } else {
-                f = `scale=${vfiRes}:-2,${f}`;
-            }
-            if (vfiRes !== targetRes) {
-                if (width > height) {
-                    f = `${f},scale=-2:${targetRes}:flags=lanczos`;
-                } else {
-                    f = `${f},scale=${targetRes}:-2:flags=lanczos`;
-                }
-            }
-            return f;
-        };
-        const buildArgs = (filter, out, extra = []) => [
-            "-y",
-            "-loglevel",
-            "error",
-            "-i",
-            inputName,
-            "-vf",
-            filter,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "20",
-            ...extra,
-            "-video_track_timescale",
-            "90000",
-            "-threads",
-            String(threads),
-            out,
-        ];
-        const runAndRead = async (args, out, keepFile = false) => {
-            let ffmpegLog = "";
-            const logHandler = ({ message }) => {
-                ffmpegLog += message + "\n";
-            };
-            instance.on("log", logHandler);
-            const ret = await instance.exec(args);
-            instance.off?.("log", logHandler);
-            if (ret !== 0) {
-                const tail = ffmpegLog.trim().split("\n").slice(-12).join("\n");
-                logMessage("VFI ffmpeg failed (exit " + ret + "):", "error");
-                if (tail) logMessage(tail, "error");
-                await instance.deleteFile(inputName).catch(() => {});
-                await instance.deleteFile(out).catch(() => {});
-                progressBar.classList.remove("indeterminate");
-                throw new Error("VFI ffmpeg failed with exit code " + ret);
-            }
-            const data = await instance.readFile(out);
-            if (!data || data.length < 100) {
-                logMessage("VFI produced empty or invalid output.", "error");
-                await instance.deleteFile(inputName).catch(() => {});
-                await instance.deleteFile(out).catch(() => {});
-                progressBar.classList.remove("indeterminate");
-                throw new Error("VFI produced no output");
-            }
-            if (!keepFile) {
-                await instance.deleteFile(out).catch(() => {});
-            }
-            return data;
-        };
-
-        logMessage(
-            "Interpolating video frames to 60fps... This may take up to a minute.",
-            "info",
-        );
-        showProgress();
-        progressBar.classList.add("indeterminate");
-
-        const outputData = await runAndRead(
-            buildArgs(buildFilter(), outputName, ["-c:a", "copy"]),
-            outputName,
-        );
-
-        logMessage("Completed frame processing.", "success");
-        const head = String.fromCharCode(...outputData.slice(4, 12));
-        logMessage(`  VFI output: ${outputData.length} bytes, head="${head}"`, "info");
-
-        await instance.deleteFile(inputName).catch(() => {});
-        progressBar.classList.remove("indeterminate");
-
-        return outputData.slice().buffer;
-    } catch (err) {
-        await destroyFFmpegInstance();
-        throw err;
-    }
-}
-
-async function extractMovThumbnailFFmpeg(file) {
-    const { fetchFile } = await import("@ffmpeg/util");
-    let instance;
-    try {
-        instance = await getFFmpeg();
-        const ext = isMovFile(file) ? ".mov" : ".mp4";
-        const inputName = `thumb_input${ext}`;
-        await instance.writeFile(inputName, await fetchFile(file));
-        await instance.exec([
-            "-y",
-            "-loglevel",
-            "error",
-            "-ss",
-            "0.1",
-            "-i",
-            inputName,
-            "-vframes",
-            "1",
-            "-f",
-            "mjpeg",
-            "thumb.jpg",
-        ]);
-        const data = await instance.readFile("thumb.jpg");
-        await instance.deleteFile(inputName).catch(() => {});
-        await instance.deleteFile("thumb.jpg").catch(() => {});
-        if (data && data.length > 100) {
-            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.length);
-            let binary = "";
-            for (let j = 0; j < bytes.length; j++) {
-                binary += String.fromCharCode(bytes[j]);
-            }
-            return `data:image/jpeg;base64,${btoa(binary)}`;
-        }
-    } catch (_) {
-        return null;
-    } finally {
-        await destroyFFmpegInstance();
-    }
-    return null;
-}
 async function patchSingleFile(item) {
-    const resolutionEl = document.getElementById("outputResolution");
-    const targetRes = resolutionEl
-        ? Number.parseInt(resolutionEl.value, 10)
-        : 1080;
-
-    let sourceBuffer = null;
-    let movThumbnail = null;
-    let videoInfo = null;
-
-    if (isMovFile(item.file) && !enableInterpolation?.checked) {
-        logMessage("Processing MOV file directly...", "info");
-        try {
-            movThumbnail = await captureVideoFrame(item.file);
-        } catch (_) {
-            movThumbnail = null;
-        }
-        if (isCancelled) throw new Error("Cancelled");
-    }
-
-    if (enableInterpolation?.checked) {
-        const fileBytes = new Uint8Array(await item.file.arrayBuffer());
-        const fileView = new DataView(fileBytes.buffer);
-        const dims = getDimensionsFromMp4Container(fileBytes, fileView);
-        const topBoxes = parseBoxes(fileBytes, fileView, 0, fileBytes.length);
-        const moovBox = topBoxes.find((b) => b.type === "moov");
-        let codec = null;
-        if (moovBox) {
-            codec = detectVideoCodecFromMoov(fileBytes, fileView, moovBox);
-        }
-
-        if (!dims) {
-            throw new Error("Could not parse video dimensions from container.");
-        }
-
-        if (codec === "hvc1" || codec === "hev1") {
-            const container = isMovFile(item.file) ? "MOV" : "MP4";
-            logMessage(
-                `HEVC ${container} (${codec}) detected - using multi-thread VFI engine.`,
-                "info"
-            );
-        } else {
-            logMessage(
-                "Starting VFI Engine for 60fps interpolation...",
-                "info",
-            );
-        }
-        if (isCancelled) throw new Error("Cancelled");
-
-        videoInfo = await getVideoDurationAndResolution(item.file);
-        if (isCancelled) throw new Error("Cancelled");
-
-        const workingBuffer = await runVFI(
-            item.file,
-            dims.width,
-            dims.height,
-            targetRes,
-        );
-        sourceBuffer = workingBuffer;
-        logMessage(
-            "VFI interpolation complete. Proceeding to binary patch pipeline...",
-            "success",
-        );
-
-        await destroyFFmpegInstance();
-        logMessage("VFI engine reset for binary patch pipeline...", "info");
-
-        if (codec === "hvc1" || codec === "hev1") {
-            try {
-                movThumbnail = await extractMovThumbnailFFmpeg(item.file);
-            } catch (_) {
-                movThumbnail = null;
-            }
-        }
-
-    }
     if (isCancelled) throw new Error("Cancelled");
 
-    if (!sourceBuffer) {
-        videoInfo = await getVideoDurationAndResolution(item.file);
-        if (isCancelled) throw new Error("Cancelled");
-        if (!videoInfo && !isMovFile(item.file)) {
-            throw new Error("Could not parse video metadata.");
-        }
-    } else if (!videoInfo) {
-        videoInfo = await getVideoDurationAndResolution(item.file);
-    }
+    const inputBuffer = await item.file.arrayBuffer();
+    if (isCancelled) throw new Error("Cancelled");
 
-    const mimeType = getMimeType(item.file);
-    const outputName = getOutputFilename(item.file);
-
-    let inputBytes;
-    let inputView;
-
-    if (sourceBuffer) {
-        inputBytes = new Uint8Array(sourceBuffer);
-        inputView = new DataView(sourceBuffer);
-        logMessage("  Source: VFI 60fps output", "info");
+    const videoInfo = await getVideoDurationAndResolution(item.file).catch(() => null);
+    if (videoInfo) {
+        logMessage(
+            `  Source: ${videoInfo.width}x${videoInfo.height} (${videoInfo.width > videoInfo.height ? "landscape" : "portrait"})`,
+            "info",
+        );
     } else {
-        inputBytes = new Uint8Array(await item.file.arrayBuffer());
-        inputView = new DataView(inputBytes.buffer);
-        if (videoInfo) {
-            logMessage(
-                `  Source: ${videoInfo.width}x${videoInfo.height} (${
-                    videoInfo.width > videoInfo.height
-                        ? "landscape"
-                        : "portrait"
-                })`,
-                "info",
-            );
-        } else {
-            logMessage(
-                "  Source: MOV file (dimensions from container)",
-                "info",
-            );
-        }
+        logMessage("  Source: original MP4/MOV file", "info");
     }
 
-    logMessage("  Normalizing container...", "info");
-    const normalized = normalizeContainer(inputBytes, inputView);
-    let finalBuffer = normalized.newBuffer;
-    let finalBytes = normalized.newBytes;
-    let finalView = normalized.newView;
+    // The only processing step: run the audio-inflation MP4 patcher.
+    // No FFmpeg, frame interpolation, resizing, transcoding, normalization,
+    // bitrate conversion, FPS validation, or other compression pipeline.
+    logMessage("  Applying audio-inflation patch only...", "info");
+    const patchResult = await patchAudioInflationInWorker(inputBuffer);
+    if (isCancelled) throw new Error("Cancelled");
 
-    if (normalized.changed) {
-        logMessage("  Container normalized.", "success");
-    } else if (!normalized.valid) {
-        throw new Error("Invalid container: moov box not found");
-    } else {
-        logMessage("  Container already normalized.", "info");
-    }
+    logMessage(
+        `  Audio inflation complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} added samples).`,
+        "success",
+    );
 
-    // Keep a clean, truthful TikTok upload artifact before the local sample-table
-    // inflation step. TikTok accepts only real 23–60 FPS media timing.
-    let tiktokUploadBlob = null;
-    let tiktokUploadMeta = null;
-    let tiktokUploadValidation = null;
+    let movThumbnail = null;
     try {
-        tiktokUploadMeta = inspectMp4ForTikTok(finalBuffer, "video/mp4");
-        tiktokUploadValidation = validateTikTokArtifact(tiktokUploadMeta);
-        tiktokUploadBlob = new Blob([finalBuffer.slice(0)], { type: "video/mp4" });
-        if (tiktokUploadValidation.valid) {
-            logMessage(
-                `  TikTok draft artifact ready: ${tiktokUploadMeta.width}x${tiktokUploadMeta.height} · ${formatRealFps(tiktokUploadMeta.fps)} FPS.`,
-                "success",
-            );
-        } else {
-            logMessage(
-                `  TikTok draft artifact is incompatible: ${tiktokUploadValidation.errors.map((item) => item.message).join(" ")}`,
-                "warning",
-            );
-        }
-    } catch (error) {
-        tiktokUploadValidation = {
-            valid: false,
-            errors: [{ code: "metadata", message: error.message || "Unable to inspect clean TikTok artifact." }],
-        };
-        logMessage(`  TikTok artifact inspection failed: ${error.message}`, "warning");
+        movThumbnail = await captureVideoFrame(item.file);
+    } catch (_) {
+        movThumbnail = null;
     }
-
-    const inflateResult = inflateSampleTableVideo(finalBytes, finalView, 10);
-    finalBuffer = inflateResult.newBuffer;
-    finalBytes = inflateResult.newBytes;
-    finalView = new DataView(finalBuffer);
-    logMessage("  Frame Density Inflation: Applied.", "success");
 
     return {
-        finalBuffer,
-        outputName,
-        mimeType,
-        prePatchBuffer: sourceBuffer,
+        finalBuffer: patchResult.buffer,
+        outputName: getOutputFilename(item.file),
+        mimeType: "video/mp4",
+        prePatchBuffer: null,
         movThumbnail,
-        tiktokUploadBlob,
-        tiktokUploadMeta,
-        tiktokUploadValidation,
+        tiktokUploadBlob: null,
+        tiktokUploadMeta: null,
+        tiktokUploadValidation: null,
     };
 }
 
@@ -2899,7 +2619,7 @@ clearBtn.addEventListener("click", async (event) => {
     if (currentFlowState === "patching") {
         isCancelled = true;
         logMessage("Cancelling active interpolation progress...", "warning");
-        await destroyFFmpegInstance();
+        
         return;
     }
     selectedFiles = [];
