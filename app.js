@@ -1203,6 +1203,7 @@ function initializeBottomNavigation() {
     const compressButton = document.getElementById("navCompressBtn");
     const historyButton = document.getElementById("navHistoryBtn");
     const checkButton = document.getElementById("navCheckBtn");
+    const tutorialButton = document.getElementById("navTutorialBtn");
     const profileButton = document.getElementById("navProfileBtn");
     const profileModal = document.getElementById("profileModal");
 
@@ -1230,6 +1231,13 @@ function initializeBottomNavigation() {
         setActiveNavigation("check");
         focusNavigationSection(videoCheckSection);
         window.setTimeout(() => videoCheckUrl?.focus({ preventScroll: true }), 250);
+    });
+
+    tutorialButton?.addEventListener("click", () => {
+        setActiveNavigation("tutorial");
+        openModal("tutorialModal");
+        const tutorialVideo = document.getElementById("tutorialVideo");
+        window.setTimeout(() => tutorialVideo?.focus({ preventScroll: true }), 120);
     });
 
     profileButton?.addEventListener("click", () => {
@@ -1288,6 +1296,19 @@ function initializeBottomNavigation() {
         if (event.target === profileModal) {
             closeModal("profileModal");
         }
+    });
+
+    const tutorialModal = document.getElementById("tutorialModal");
+    const tutorialVideo = document.getElementById("tutorialVideo");
+    const closeTutorial = () => {
+        tutorialVideo?.pause();
+        closeModal("tutorialModal");
+        setActiveNavigation(document.body.dataset.appView || "compress");
+    };
+
+    document.getElementById("tutorialCloseBtn")?.addEventListener("click", closeTutorial);
+    tutorialModal?.addEventListener("click", (event) => {
+        if (event.target === tutorialModal) closeTutorial();
     });
 
     setPrimaryAppView("compress");

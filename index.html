@@ -592,6 +592,16 @@
     <button
       type="button"
       class="app-nav-button"
+      id="navTutorialBtn"
+      data-view="tutorial"
+    >
+      <i class="ri-play-circle-line" aria-hidden="true"></i>
+      <span>Tutorial</span>
+    </button>
+
+    <button
+      type="button"
+      class="app-nav-button"
       id="navProfileBtn"
       data-view="profile"
     >
@@ -1311,6 +1321,46 @@
     </div>
   </div>
 
+
+  <!-- Tutorial video modal -->
+  <div
+    class="modal-overlay tutorial-modal-overlay"
+    id="tutorialModal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="tutorialModalTitle"
+    hidden
+  >
+    <div class="modal-card tutorial-modal-card">
+      <div class="modal-header tutorial-modal-header">
+        <div>
+          <span class="tutorial-kicker">HOW TO USE</span>
+          <h2 id="tutorialModalTitle">វីដេអូណែនាំការប្រើប្រាស់</h2>
+        </div>
+        <button type="button" class="modal-close" id="tutorialCloseBtn" aria-label="Close tutorial">
+          <i class="ri-close-line" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div class="tutorial-video-shell">
+        <video
+          id="tutorialVideo"
+          controls
+          playsinline
+          preload="metadata"
+          poster="/preview.webp"
+        >
+          <source src="/tutorial.mp4" type="video/mp4">
+          Browser របស់អ្នកមិនអាចចាក់វីដេអូនេះបានទេ។
+        </video>
+      </div>
+
+      <p class="tutorial-help-text">
+        ចុច Play ដើម្បីមើលរបៀបជ្រើសវីដេអូ, Patch និង Download។
+      </p>
+    </div>
+  </div>
+
   <!-- Telegram login access lock -->
   <div
     class="access-lock"
@@ -1343,7 +1393,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260806-co64-login-v1"
+    src="app.js?v=20260806-tutorial-v1"
   ></script>
 </body>
 </html>
