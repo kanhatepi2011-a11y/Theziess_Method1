@@ -19,6 +19,13 @@ import {
   safeEqual,
   sendTelegramMessage,
 } from "../_telegram-bot.js";
+import {
+  buildTelegramWelcomeKeyboard,
+  buildTelegramWelcomeMessage,
+  getTelegramWelcomeConfig,
+  isHumanTelegramMember,
+  isTelegramGroupAdmin,
+} from "../_telegram-welcome.js";
 
 const PAGE_SIZE = 8;
 
@@ -576,16 +583,72 @@ async function handleAdminAction(chatId, action, adminTelegramId) {
   return sendDashboard(chatId);
 }
 
+async function sendWelcomeMessage(chat, member) {
+  const config = getTelegramWelcomeConfig();
+  if (!config.enabled || !isHumanTelegramMember(member)) return;
+
+  const text = buildTelegramWelcomeMessage(member, chat, config);
+  if (!text) return;
+
+  const replyMarkup = buildTelegramWelcomeKeyboard(config);
+  await sendTelegramMessage(chat.id, text, {
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+}
+
+async function handleNewChatMembers(message) {
+  const chat = message.chat;
+  const members = Array.isArray(message.new_chat_members)
+    ? message.new_chat_members
+    : [];
+
+  if (!chat?.id || members.length === 0) return;
+
+  for (const member of members) {
+    await sendWelcomeMessage(chat, member);
+  }
+}
+
+async function handleTestWelcome(message, senderId) {
+  const chat = message.chat;
+  if (!chat?.id || !["group", "supergroup"].includes(chat.type)) {
+    await sendTelegramMessage(
+      chat?.id || senderId,
+      "⚠️ <b>/testwelcome must be used inside a Telegram group.</b>",
+    );
+    return;
+  }
+
+  if (!(await isTelegramGroupAdmin(chat.id, senderId))) {
+    await sendTelegramMessage(
+      chat.id,
+      "⛔ <b>Group admin access required.</b>",
+    );
+    return;
+  }
+
+  await sendWelcomeMessage(chat, message.from);
+}
+
 async function handleMessage(message) {
   const chatId = message.chat?.id;
   const senderId = message.from?.id;
-  const text = String(message.text || "").trim();
 
+  if (Array.isArray(message.new_chat_members)) {
+    await handleNewChatMembers(message);
+  }
+
+  const text = String(message.text || "").trim();
   if (!chatId || !senderId || !text) return;
 
   const commandMatch = /^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*))?$/.exec(text);
   const command = commandMatch?.[1]?.toLowerCase() || "";
   const argument = commandMatch?.[2]?.trim() || "";
+
+  if (command === "testwelcome") {
+    await handleTestWelcome(message, senderId);
+    return;
+  }
 
   if (command === "id" || command === "whoami") {
     await sendTelegramMessage(

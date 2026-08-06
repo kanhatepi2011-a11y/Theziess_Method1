@@ -24,6 +24,7 @@ const ADMIN_COMMANDS = [
   { command: "payments", description: "Show recent payments" },
   { command: "id", description: "Show your Telegram ID" },
   { command: "ping", description: "Test whether the bot is online" },
+  { command: "testwelcome", description: "Preview the group welcome message" },
 ];
 
 function readBody(req) {
@@ -60,7 +61,7 @@ function validateManualSetupKey(req) {
   return safeEqual(getProvidedSetupKey(req), configuredKey);
 }
 
-const BOT_CONFIGURATION_VERSION = "admin-subscriptions-v11";
+const BOT_CONFIGURATION_VERSION = "telegram-welcome-v12";
 
 function webhookVersion(secret, token, adminIds) {
   return crypto
@@ -110,6 +111,7 @@ export async function ensureTelegramWebhook(req, { force = false } = {}) {
         { command: "id", description: "Show your Telegram ID" },
         { command: "ping", description: "Test whether the bot is online" },
         { command: "help", description: "Open bot help" },
+        { command: "testwelcome", description: "Preview the group welcome message" },
       ],
     });
 
