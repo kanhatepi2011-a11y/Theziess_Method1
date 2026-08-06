@@ -391,8 +391,25 @@ function updateTelegramProfileUI(loggedIn, active) {
     if (profilePlansInlineBtn) profilePlansInlineBtn.hidden = false;
 }
 
-function openModal(id) { document.getElementById(id)?.classList.add("active"); }
-function closeModal(id) { document.getElementById(id)?.classList.remove("active"); }
+function openModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    // Force layout so the active transition works even when the element was hidden.
+    void modal.offsetWidth;
+    modal.classList.add("active");
+}
+
+function closeModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.classList.remove("active");
+    modal.setAttribute("aria-hidden", "true");
+    window.setTimeout(() => {
+        if (!modal.classList.contains("active")) modal.hidden = true;
+    }, 220);
+}
 
 function configurePlanActivationModal(plan) {
     const isFreeTrial = plan?.id === "free";
