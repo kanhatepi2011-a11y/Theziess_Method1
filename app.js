@@ -1317,8 +1317,40 @@ function initializeBottomNavigation() {
 
     const tutorialModal = document.getElementById("tutorialModal");
     const tutorialVideos = [...document.querySelectorAll("#tutorialModal .tutorial-video")];
+
+    document.querySelectorAll("#tutorialModal .tutorial-video-shell").forEach((shell) => {
+        const cover = shell.querySelector(".tutorial-cover");
+        const video = shell.querySelector(".tutorial-video");
+        if (!cover || !video) return;
+
+        cover.addEventListener("click", async () => {
+            tutorialVideos.forEach((otherVideo) => {
+                if (otherVideo !== video) {
+                    otherVideo.pause();
+                    otherVideo.closest(".tutorial-video-shell")?.classList.remove("is-playing");
+                }
+            });
+            shell.classList.add("is-playing");
+            try {
+                await video.play();
+            } catch (error) {
+                shell.classList.remove("is-playing");
+                console.warn("Tutorial video could not start:", error);
+            }
+        });
+
+        video.addEventListener("ended", () => {
+            shell.classList.remove("is-playing");
+            video.currentTime = 0;
+        });
+    });
+
     const closeTutorial = () => {
-        tutorialVideos.forEach((video) => video.pause());
+        tutorialVideos.forEach((video) => {
+            video.pause();
+            video.currentTime = 0;
+            video.closest(".tutorial-video-shell")?.classList.remove("is-playing");
+        });
         closeModal("tutorialModal");
         setActiveNavigation(document.body.dataset.appView || "compress");
     };

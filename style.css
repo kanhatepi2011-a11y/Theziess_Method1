@@ -3719,6 +3719,7 @@ body[data-app-view="check"] .panel-right {
 .tutorial-card-heading p { margin: 5px 0 0; line-height: 1.5; font-size: 0.88rem; }
 
 .tutorial-video-shell {
+  position: relative;
   overflow: hidden;
   border: 1px solid rgba(183, 118, 255, 0.3);
   border-radius: 18px;
@@ -3732,6 +3733,70 @@ body[data-app-view="check"] .panel-right {
   height: 100%;
   object-fit: contain;
   background: #000;
+}
+
+.tutorial-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  border: 0;
+  padding: 18px;
+  color: #fff;
+  text-align: center;
+  cursor: pointer;
+  background:
+    radial-gradient(circle at 50% 24%, rgba(95, 223, 255, 0.28), transparent 30%),
+    radial-gradient(circle at 18% 80%, rgba(176, 45, 255, 0.28), transparent 38%),
+    linear-gradient(145deg, rgba(29, 11, 59, 0.98), rgba(8, 3, 22, 0.98));
+  transition: opacity 180ms ease, visibility 180ms ease, transform 180ms ease;
+}
+
+.tutorial-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.tutorial-cover > * { position: relative; z-index: 1; }
+
+.tutorial-cover-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 22px;
+  font-size: 2rem;
+  background: linear-gradient(135deg, #9a33ff, #45d8ff);
+  box-shadow: 0 14px 38px rgba(132, 63, 255, 0.42);
+}
+
+.tutorial-cover-kicker {
+  margin-top: 4px;
+  color: #cba3ff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+
+.tutorial-cover strong { font-size: clamp(1rem, 3.2vw, 1.25rem); }
+.tutorial-cover small { color: rgba(236, 225, 255, 0.72); font-size: 0.8rem; }
+
+.tutorial-video-shell.is-playing .tutorial-cover {
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(1.03);
+  pointer-events: none;
 }
 
 .tutorial-help-text {
