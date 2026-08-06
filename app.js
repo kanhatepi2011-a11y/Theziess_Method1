@@ -739,43 +739,32 @@ async function initializeMembership() {
         button.disabled = true;
         button.setAttribute("aria-busy", "true");
 
-        // Paid plans are read-only on the public website. This button only
-        // refreshes the user's session after an administrator grants access.
+        // Paid plans are activated manually by the administrator. Send the
+        // selected plan details directly to @thephal in Telegram.
         if (activatedPlan.adminOnly) {
-            button.textContent = "Checking…";
+            const telegramUsername = "thephal";
+            const message = [
+                "ជំរាបសួរបង👋",
+                "",
+                "ខ្ញុំចង់ទិញ៖",
+                `Plan : ${activatedPlan.name || "—"}`,
+                `Price: ${activatedPlan.price || "—"}`,
+                `Expired: ${activatedPlan.durationLabel || "—"}`,
+            ].join("\n");
+            const telegramUrl = `https://t.me/${telegramUsername}?text=${encodeURIComponent(message)}`;
+
             if (paymentNotice) {
                 paymentNotice.classList.remove("error");
-                paymentNotice.textContent = "Checking whether an administrator has assigned this plan…";
+                paymentNotice.textContent = `Opening Telegram chat with @${telegramUsername}…`;
             }
 
-            try {
-                await loadServerSession({ retries: 2 });
-                const assigned = hasActiveSubscription() &&
-                    currentSubscription?.planId === activatedPlan.id;
+            // Location navigation is more reliable than window.open on mobile
+            // browsers because it is executed directly from the user's click.
+            window.location.href = telegramUrl;
 
-                if (assigned) {
-                    pendingPlan = null;
-                    closeModal("paymentModal");
-                    hideSubscriptionPlans();
-                    updateAccessUI();
-                    logMessage(`${activatedPlan.name} was assigned by an administrator. Compression is now unlocked.`, "success");
-                    return;
-                }
-
-                if (paymentNotice) {
-                    paymentNotice.textContent = `${activatedPlan.name} is not active yet. Ask the administrator to use /grant ${currentUser?.id || "YOUR_TELEGRAM_ID"} ${activatedPlan.id} in the Telegram bot.`;
-                    paymentNotice.classList.add("error");
-                }
-            } catch (error) {
-                if (paymentNotice) {
-                    paymentNotice.textContent = error.message || "Unable to check the subscription right now.";
-                    paymentNotice.classList.add("error");
-                }
-            } finally {
-                button.disabled = false;
-                button.removeAttribute("aria-busy");
-                button.textContent = originalLabel;
-            }
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+            button.textContent = originalLabel;
             return;
         }
 
