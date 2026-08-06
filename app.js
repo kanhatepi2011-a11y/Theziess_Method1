@@ -1236,8 +1236,8 @@ function initializeBottomNavigation() {
     tutorialButton?.addEventListener("click", () => {
         setActiveNavigation("tutorial");
         openModal("tutorialModal");
-        const tutorialVideo = document.getElementById("tutorialVideo");
-        window.setTimeout(() => tutorialVideo?.focus({ preventScroll: true }), 120);
+        const firstTutorialVideo = document.querySelector("#tutorialModal .tutorial-video");
+        window.setTimeout(() => firstTutorialVideo?.focus({ preventScroll: true }), 120);
     });
 
     profileButton?.addEventListener("click", () => {
@@ -1299,9 +1299,9 @@ function initializeBottomNavigation() {
     });
 
     const tutorialModal = document.getElementById("tutorialModal");
-    const tutorialVideo = document.getElementById("tutorialVideo");
+    const tutorialVideos = [...document.querySelectorAll("#tutorialModal .tutorial-video")];
     const closeTutorial = () => {
-        tutorialVideo?.pause();
+        tutorialVideos.forEach((video) => video.pause());
         closeModal("tutorialModal");
         setActiveNavigation(document.body.dataset.appView || "compress");
     };

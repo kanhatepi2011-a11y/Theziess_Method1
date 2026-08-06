@@ -1322,43 +1322,79 @@
   </div>
 
 
-  <!-- Tutorial video modal -->
+  <!-- Tutorial page -->
   <div
-    class="modal-overlay tutorial-modal-overlay"
+    class="modal-overlay tutorial-page-overlay"
     id="tutorialModal"
     role="dialog"
     aria-modal="true"
     aria-labelledby="tutorialModalTitle"
     hidden
   >
-    <div class="modal-card tutorial-modal-card">
-      <div class="modal-header tutorial-modal-header">
+    <section class="tutorial-page">
+      <header class="tutorial-page-header">
         <div>
           <span class="tutorial-kicker">HOW TO USE</span>
           <h2 id="tutorialModalTitle">វីដេអូណែនាំការប្រើប្រាស់</h2>
+          <p>មើលតាមជំហានខាងក្រោម ដើម្បី Patch និង Upload វីដេអូបានត្រឹមត្រូវ។</p>
         </div>
-        <button type="button" class="modal-close" id="tutorialCloseBtn" aria-label="Close tutorial">
+        <button type="button" class="modal-close tutorial-page-close" id="tutorialCloseBtn" aria-label="Close tutorial">
           <i class="ri-close-line" aria-hidden="true"></i>
         </button>
+      </header>
+
+      <div class="tutorial-video-grid">
+        <article class="tutorial-video-card">
+          <div class="tutorial-card-heading">
+            <span class="tutorial-step">01</span>
+            <div>
+              <h3>របៀប Patch វីដេអូ</h3>
+              <p>ជ្រើសវីដេអូ, ចុច Patch និង Download ឯកសារដែលបានរៀបចំរួច។</p>
+            </div>
+          </div>
+          <div class="tutorial-video-shell">
+            <video class="tutorial-video" controls playsinline preload="metadata" poster="/preview.webp">
+              <source src="/tutorial-patch.mp4" type="video/mp4">
+              Browser របស់អ្នកមិនអាចចាក់វីដេអូនេះបានទេ។
+            </video>
+          </div>
+        </article>
+
+        <article class="tutorial-video-card">
+          <div class="tutorial-card-heading">
+            <span class="tutorial-step">02</span>
+            <div>
+              <h3>របៀប Upload លើ Android ឬ Computer</h3>
+              <p>របៀប Upload វីដេអូទៅ TikTok Studio តាម Android និងកុំព្យូទ័រ។</p>
+            </div>
+          </div>
+          <div class="tutorial-video-shell">
+            <video class="tutorial-video" controls playsinline preload="metadata" poster="/preview.webp">
+              <source src="/tutorial-android-computer.mp4" type="video/mp4">
+              Browser របស់អ្នកមិនអាចចាក់វីដេអូនេះបានទេ។
+            </video>
+          </div>
+        </article>
+
+        <article class="tutorial-video-card">
+          <div class="tutorial-card-heading">
+            <span class="tutorial-step">03</span>
+            <div>
+              <h3>របៀប Upload លើ iOS</h3>
+              <p>ជំហាន Upload វីដេអូដែលបាន Patch រួចពី iPhone ឬ iPad។</p>
+            </div>
+          </div>
+          <div class="tutorial-video-shell">
+            <video class="tutorial-video" controls playsinline preload="metadata" poster="/preview.webp">
+              <source src="/tutorial-ios.mp4" type="video/mp4">
+              Browser របស់អ្នកមិនអាចចាក់វីដេអូនេះបានទេ។
+            </video>
+          </div>
+        </article>
       </div>
 
-      <div class="tutorial-video-shell">
-        <video
-          id="tutorialVideo"
-          controls
-          playsinline
-          preload="metadata"
-          poster="/preview.webp"
-        >
-          <source src="/tutorial.mp4" type="video/mp4">
-          Browser របស់អ្នកមិនអាចចាក់វីដេអូនេះបានទេ។
-        </video>
-      </div>
-
-      <p class="tutorial-help-text">
-        ចុច Play ដើម្បីមើលរបៀបជ្រើសវីដេអូ, Patch និង Download។
-      </p>
-    </div>
+      <p class="tutorial-help-text">សូមជំនួសវីដេអូទាំង 3 ក្នុង project ដោយរក្សាឈ្មោះ file ដដែល។</p>
+    </section>
   </div>
 
   <!-- Telegram login access lock -->
@@ -1393,7 +1429,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260806-tutorial-v1"
+    src="app.js?v=20260806-tutorial-v2"
   ></script>
 </body>
 </html>
