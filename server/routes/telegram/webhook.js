@@ -645,6 +645,18 @@ async function handleMessage(message) {
   const command = commandMatch?.[1]?.toLowerCase() || "";
   const argument = commandMatch?.[2]?.trim() || "";
 
+  // Ignore unknown commands in Telegram groups. They may belong to another bot.
+  const isGroupChat = ["group", "supergroup"].includes(message.chat?.type);
+  const knownCommands = new Set([
+    "testwelcome", "id", "whoami", "ping", "start", "help", "admin",
+    "stats", "users", "user", "grant", "addplan", "addsubscription",
+    "revoke", "removeplan", "plans", "subscriptions", "trials", "payments",
+  ]);
+
+  if (isGroupChat && command && !knownCommands.has(command)) {
+    return;
+  }
+
   if (command === "testwelcome") {
     await handleTestWelcome(message, senderId);
     return;
