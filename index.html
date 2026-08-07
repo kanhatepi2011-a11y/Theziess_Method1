@@ -41,7 +41,7 @@
 
   <link
     rel="stylesheet"
-    href="style.css?v=20260806-premium-icons-v2"
+    href="style.css?v=20260807-telegram-ui-v2"
   >
 
   <link
@@ -823,48 +823,65 @@
 
   <!-- Telegram Login modal -->
   <div
-    class="modal-overlay"
+    class="modal-overlay telegram-auth-overlay"
     id="telegramModal"
     role="dialog"
     aria-modal="true"
     aria-labelledby="telegramModalTitle"
   >
-    <div class="modal-card auth-modal-card">
-      <div class="modal-header">
-        <div class="modal-header-left">
-          <i
-            class="ri-telegram-2-fill"
-            aria-hidden="true"
-          ></i>
+    <div class="modal-card auth-modal-card telegram-auth-card">
+      <div class="telegram-auth-glow telegram-auth-glow-one" aria-hidden="true"></div>
+      <div class="telegram-auth-glow telegram-auth-glow-two" aria-hidden="true"></div>
 
-          <span
-            class="modal-title"
-            id="telegramModalTitle"
-          >
-            Telegram Login
-          </span>
+      <button
+        type="button"
+        class="modal-close-btn telegram-auth-close"
+        data-close-modal="telegramModal"
+        aria-label="បិទ"
+      >
+        <i class="ri-close-line" aria-hidden="true"></i>
+      </button>
+
+      <div class="telegram-auth-hero">
+        <div class="telegram-auth-logo" aria-hidden="true">
+          <span class="telegram-auth-logo-ring"></span>
+          <i class="ri-telegram-2-fill"></i>
         </div>
 
-        <button
-          type="button"
-          class="modal-close-btn"
-          data-close-modal="telegramModal"
-          aria-label="បិទ"
-        >
-          <i
-            class="ri-close-fill"
-            aria-hidden="true"
-          ></i>
-        </button>
+        <span class="telegram-auth-eyebrow">
+          <i class="ri-shield-check-fill" aria-hidden="true"></i>
+          SECURE LOGIN
+        </span>
+
+        <h2 id="telegramModalTitle">ចូលតាម Telegram</h2>
+        <p>
+          ភ្ជាប់គណនី Telegram របស់អ្នក ដើម្បីចូលប្រើ TheZiess Method
+          យ៉ាងរហ័ស និងមានសុវត្ថិភាព។
+        </p>
       </div>
 
-      <div class="modal-body">
-        <p class="modal-copy">
-          ចូលដោយ Telegram account ពិតរបស់អ្នក។
-          Telegram នឹងស្នើឱ្យអ្នកអនុញ្ញាត
-          ហើយ Server របស់យើងនឹងផ្ទៀងផ្ទាត់
-          signature មុនបង្កើត session។
-        </p>
+      <div class="modal-body telegram-auth-body">
+        <div class="telegram-auth-features" aria-label="Telegram login security details">
+          <div class="telegram-auth-feature">
+            <span class="telegram-auth-feature-icon">
+              <i class="ri-shield-keyhole-line" aria-hidden="true"></i>
+            </span>
+            <div>
+              <strong>ការផ្ទៀងផ្ទាត់សុវត្ថិភាព</strong>
+              <small>Server ផ្ទៀងផ្ទាត់ signature មុនបង្កើត session</small>
+            </div>
+          </div>
+
+          <div class="telegram-auth-feature">
+            <span class="telegram-auth-feature-icon">
+              <i class="ri-user-follow-line" aria-hidden="true"></i>
+            </span>
+            <div>
+              <strong>ប្រើគណនី Telegram របស់អ្នក</strong>
+              <small>មិនចាំបាច់បង្កើត password ថ្មីទេ</small>
+            </div>
+          </div>
+        </div>
 
         <div
           class="telegram-login-actions"
@@ -875,14 +892,11 @@
             class="modal-btn modal-btn-confirm telegram-login-btn"
             id="telegramOidcLoginBtn"
           >
-            <i
-              class="ri-telegram-2-fill"
-              aria-hidden="true"
-            ></i>
-
-            <span>
-              Continue with Telegram
+            <span class="telegram-login-btn-icon">
+              <i class="ri-telegram-2-fill" aria-hidden="true"></i>
             </span>
+            <span>បន្តជាមួយ Telegram</span>
+            <i class="ri-arrow-right-line telegram-login-arrow" aria-hidden="true"></i>
           </button>
 
           <p
@@ -893,21 +907,16 @@
           ></p>
         </div>
 
-        <p class="telegram-domain-note">
-          Telegram callback URL:
-          <strong id="telegramCallbackUrl">
-            Loading…
-          </strong>
-        </p>
       </div>
 
-      <div class="modal-actions">
+      <div class="modal-actions telegram-auth-actions">
         <button
           type="button"
-          class="modal-btn modal-btn-cancel"
+          class="modal-btn modal-btn-cancel telegram-auth-cancel"
           data-close-modal="telegramModal"
         >
-          Cancel
+          <i class="ri-arrow-go-back-line" aria-hidden="true"></i>
+          <span>បោះបង់</span>
         </button>
       </div>
     </div>
@@ -1460,7 +1469,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260806-tutorial-cover-v1"
+    src="app.js?v=20260807-auto-login-v3"
   ></script>
 </body>
 </html>

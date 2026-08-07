@@ -648,10 +648,19 @@ async function loadServerSession({ retries = 2, preserveExistingSubscription = f
 
 
 async function initializeMembership() {
-    
     const params = new URLSearchParams(location.search);
     const returningFromTelegram = params.get("telegram_login") === "success";
     await loadServerSession({ retries: returningFromTelegram ? 4 : 2 });
+
+    // New/unauthenticated visitors should immediately see the Telegram login
+    // screen. Existing users with a valid server session (or the stored
+    // Telegram fallback) are never interrupted by the login modal.
+    if (!LOCAL_STANDALONE_MODE && !currentUser) {
+        openModal("telegramModal");
+    } else {
+        closeModal("telegramModal");
+    }
+
     await loadTikTokAccount();
 
     const tiktokResult = params.get("tiktok");
@@ -695,7 +704,7 @@ async function initializeMembership() {
         telegramOidcLoginBtn.disabled = false;
         telegramOidcLoginBtn.removeAttribute("aria-busy");
         const label = telegramOidcLoginBtn.querySelector("span");
-        if (label) label.textContent = "Continue with Telegram";
+        if (label) label.textContent = "បន្តជាមួយ Telegram";
     };
 
     telegramOidcLoginBtn?.addEventListener("click", () => {
@@ -707,7 +716,7 @@ async function initializeMembership() {
         telegramOidcLoginBtn.disabled = true;
         telegramOidcLoginBtn.setAttribute("aria-busy", "true");
         const label = telegramOidcLoginBtn.querySelector("span");
-        if (label) label.textContent = "Connecting to Telegram…";
+        if (label) label.textContent = "កំពុងភ្ជាប់ទៅ Telegram…";
 
         // Start the server-side OIDC + PKCE flow. The previous build had no
         // click handler here, so the button looked active but did nothing.
@@ -736,6 +745,9 @@ async function initializeMembership() {
         currentSubscription = null;
         currentTikTokAccount = null;
         updateAccessUI();
+
+        // Logging out returns the visitor to the login screen immediately.
+        if (!LOCAL_STANDALONE_MODE) openModal("telegramModal");
     });
     document.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", () => closeModal(button.dataset.closeModal)));
     document.querySelectorAll(".plan-card").forEach((card) => card.addEventListener("click", () => {

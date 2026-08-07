@@ -4476,3 +4476,532 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(168,85,247,.
   .upload-feature-chips span { padding: 5px 8px; font-size: 10px; }
   .format-pill { padding: 4px 8px; }
 }
+
+/* =========================================================
+   TUTORIAL MOBILE SCROLL FIX — 2026-08-07
+   Global .modal-overlay.active disables touch gestures. The
+   tutorial is a full-page scroll surface, so restore vertical
+   pan/scroll specifically for this modal on phones/tablets.
+   ========================================================= */
+.tutorial-page-overlay.active {
+  touch-action: pan-y;
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@supports (height: 100dvh) {
+  .tutorial-page-overlay {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+}
+
+@media (max-width: 560px) {
+  .tutorial-page-overlay {
+    overflow-y: scroll;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tutorial-page {
+    min-height: 0;
+  }
+
+  .tutorial-video-grid {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+}
+
+/* =========================================================
+   TELEGRAM LOGIN — PREMIUM GLASS REDESIGN V2
+   Scoped to #telegramModal to avoid changing other dialogs.
+   ========================================================= */
+#telegramModal.telegram-auth-overlay {
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 16%, rgba(56, 189, 248, .13), transparent 32%),
+    radial-gradient(circle at 20% 85%, rgba(139, 92, 246, .14), transparent 34%),
+    rgba(2, 0, 8, .82);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+}
+
+#telegramModal .telegram-auth-card {
+  position: relative;
+  isolation: isolate;
+  width: min(500px, calc(100vw - 28px));
+  max-height: min(760px, calc(100dvh - 28px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(178, 118, 255, .42);
+  border-radius: 28px;
+  background:
+    linear-gradient(160deg, rgba(28, 11, 49, .96), rgba(8, 3, 18, .98) 62%),
+    rgba(8, 3, 18, .96);
+  box-shadow:
+    0 30px 100px rgba(0, 0, 0, .68),
+    0 0 0 1px rgba(255, 255, 255, .025) inset,
+    0 0 52px rgba(126, 87, 194, .10);
+  scrollbar-width: none;
+}
+
+#telegramModal .telegram-auth-card::-webkit-scrollbar { display: none; }
+
+#telegramModal .telegram-auth-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(120deg, rgba(255,255,255,.055), transparent 24%),
+    linear-gradient(180deg, rgba(56,189,248,.035), transparent 36%);
+}
+
+#telegramModal .telegram-auth-glow {
+  position: absolute;
+  z-index: -2;
+  width: 210px;
+  height: 210px;
+  border-radius: 999px;
+  filter: blur(52px);
+  opacity: .22;
+  pointer-events: none;
+}
+
+#telegramModal .telegram-auth-glow-one {
+  top: -100px;
+  left: -80px;
+  background: #38bdf8;
+}
+
+#telegramModal .telegram-auth-glow-two {
+  right: -90px;
+  bottom: 45px;
+  background: #8b5cf6;
+}
+
+#telegramModal .telegram-auth-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 4;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(216,180,254,.16);
+  border-radius: 999px;
+  background: rgba(255,255,255,.035);
+  color: #b8adca;
+  box-shadow: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: .18s ease;
+}
+
+#telegramModal .telegram-auth-close i { font-size: 19px; }
+
+#telegramModal .telegram-auth-close:hover {
+  transform: none;
+  color: #fff;
+  border-color: rgba(216,180,254,.32);
+  background: rgba(255,255,255,.075);
+  box-shadow: 0 8px 24px rgba(0,0,0,.22);
+}
+
+#telegramModal .telegram-auth-hero {
+  position: relative;
+  padding: 32px 54px 20px;
+  text-align: center;
+}
+
+#telegramModal .telegram-auth-logo {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 24px;
+  background: linear-gradient(145deg, #50c8ff, #229ed9 55%, #7c3aed 130%);
+  color: #fff;
+  box-shadow:
+    0 18px 38px rgba(34,158,217,.28),
+    0 0 26px rgba(56,189,248,.16),
+    inset 0 1px 0 rgba(255,255,255,.34);
+}
+
+#telegramModal .telegram-auth-logo::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.13);
+  pointer-events: none;
+}
+
+#telegramModal .telegram-auth-logo i {
+  position: relative;
+  z-index: 2;
+  font-size: 37px;
+  transform: translate(-1px, 1px);
+  text-shadow: 0 5px 16px rgba(0,0,0,.20);
+}
+
+#telegramModal .telegram-auth-logo-ring {
+  position: absolute;
+  inset: -9px;
+  border: 1px solid rgba(56,189,248,.18);
+  border-radius: 30px;
+  box-shadow: 0 0 25px rgba(56,189,248,.08);
+}
+
+#telegramModal .telegram-auth-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid rgba(125,211,252,.16);
+  border-radius: 999px;
+  background: rgba(56,189,248,.07);
+  color: #a5e6ff;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+#telegramModal .telegram-auth-eyebrow i {
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+#telegramModal .telegram-auth-hero h2 {
+  margin: 12px 0 7px;
+  color: #fff;
+  font-family: "Noto Sans Khmer", system-ui, sans-serif;
+  font-size: clamp(23px, 5vw, 29px);
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -.02em;
+}
+
+#telegramModal .telegram-auth-hero p {
+  max-width: 390px;
+  margin: 0 auto;
+  color: #a99db7;
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+#telegramModal .telegram-auth-body {
+  padding: 0 24px 22px;
+  background: transparent;
+}
+
+#telegramModal .telegram-auth-features {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+#telegramModal .telegram-auth-feature {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid rgba(216,180,254,.12);
+  border-radius: 17px;
+  background: rgba(255,255,255,.025);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+#telegramModal .telegram-auth-feature-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(56,189,248,.15);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(56,189,248,.13), rgba(139,92,246,.10));
+  color: #7dd3fc;
+}
+
+#telegramModal .telegram-auth-feature-icon i { font-size: 17px; }
+
+#telegramModal .telegram-auth-feature strong {
+  display: block;
+  margin: 1px 0 3px;
+  color: #f5efff;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#telegramModal .telegram-auth-feature small {
+  display: block;
+  color: #8f839d;
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+#telegramModal .telegram-login-actions {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+}
+
+#telegramModal .telegram-login-btn {
+  position: relative;
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 38px 1fr 20px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px 9px 10px;
+  border: 1px solid rgba(255,255,255,.21);
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(100deg, #7c3aed 0%, #8b5cf6 31%, #229ed9 76%, #38bdf8 100%);
+  color: #fff;
+  font-family: "Noto Sans Khmer", "JetBrains Mono", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .01em;
+  box-shadow:
+    0 15px 38px rgba(69,104,220,.24),
+    inset 0 1px 0 rgba(255,255,255,.24);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+
+#telegramModal .telegram-login-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, rgba(255,255,255,.12), transparent 38%, rgba(255,255,255,.05));
+}
+
+#telegramModal .telegram-login-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 19px 44px rgba(34,158,217,.26),
+    0 0 28px rgba(124,58,237,.14),
+    inset 0 1px 0 rgba(255,255,255,.30);
+}
+
+#telegramModal .telegram-login-btn:active:not(:disabled) {
+  transform: scale(.992);
+}
+
+#telegramModal .telegram-login-btn-icon {
+  position: relative;
+  z-index: 1;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.20);
+  border-radius: 13px;
+  background: rgba(255,255,255,.14);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+#telegramModal .telegram-login-btn-icon i { font-size: 21px; }
+#telegramModal .telegram-login-btn > span:nth-child(2) { position: relative; z-index: 1; }
+#telegramModal .telegram-login-arrow { position: relative; z-index: 1; font-size: 18px; opacity: .86; }
+
+#telegramModal .telegram-login-btn:disabled .telegram-login-btn-icon i {
+  animation: telegramPulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes telegramPulse {
+  from { transform: scale(.92); opacity: .7; }
+  to { transform: scale(1.06); opacity: 1; }
+}
+
+#telegramModal .telegram-login-error {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid rgba(244,63,94,.24);
+  border-radius: 13px;
+  background: rgba(244,63,94,.08);
+  color: #fda4af;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+#telegramModal .telegram-callback-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(216,180,254,.11);
+  border-radius: 15px;
+  background: rgba(3,1,9,.30);
+}
+
+#telegramModal .telegram-callback-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(168,85,247,.09);
+  color: #c4b5fd;
+}
+
+#telegramModal .telegram-callback-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#telegramModal .telegram-callback-content > span {
+  color: #71657e;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+#telegramModal .telegram-callback-content strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a99db7;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+#telegramModal .telegram-callback-status {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(52,211,153,.08);
+  color: #6ee7b7;
+  font-size: 11px;
+}
+
+#telegramModal .telegram-auth-actions {
+  padding: 0 24px 22px;
+  border-top: 0;
+}
+
+#telegramModal .telegram-auth-cancel {
+  width: 100%;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(216,180,254,.12);
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+  color: #8f839d;
+  font-family: "Noto Sans Khmer", "JetBrains Mono", system-ui, sans-serif;
+  font-size: 11px;
+  transition: .18s ease;
+}
+
+#telegramModal .telegram-auth-cancel:hover {
+  opacity: 1;
+  color: #e9d5ff;
+  border-color: rgba(216,180,254,.24);
+  background: rgba(168,85,247,.07);
+}
+
+@media (max-width: 560px) {
+  #telegramModal.telegram-auth-overlay {
+    align-items: center;
+    padding: 12px;
+  }
+
+  #telegramModal .telegram-auth-card {
+    width: min(100%, 470px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 24px;
+  }
+
+  #telegramModal .telegram-auth-close {
+    top: 13px;
+    right: 13px;
+    width: 35px;
+    height: 35px;
+  }
+
+  #telegramModal .telegram-auth-hero {
+    padding: 27px 44px 17px;
+  }
+
+  #telegramModal .telegram-auth-logo {
+    width: 68px;
+    height: 68px;
+    margin-bottom: 14px;
+    border-radius: 21px;
+  }
+
+  #telegramModal .telegram-auth-logo i { font-size: 33px; }
+  #telegramModal .telegram-auth-logo::after { border-radius: 15px; }
+  #telegramModal .telegram-auth-logo-ring { border-radius: 27px; }
+
+  #telegramModal .telegram-auth-hero h2 {
+    margin-top: 10px;
+    font-size: 23px;
+  }
+
+  #telegramModal .telegram-auth-hero p {
+    font-size: 11.5px;
+    line-height: 1.7;
+  }
+
+  #telegramModal .telegram-auth-body {
+    padding: 0 16px 16px;
+  }
+
+  #telegramModal .telegram-auth-features {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  #telegramModal .telegram-auth-feature {
+    padding: 10px 11px;
+    align-items: center;
+  }
+
+  #telegramModal .telegram-auth-feature small { font-size: 9px; }
+  #telegramModal .telegram-login-btn { min-height: 56px; border-radius: 17px; }
+  #telegramModal .telegram-callback-card { margin-top: 10px; }
+
+  #telegramModal .telegram-auth-actions {
+    padding: 0 16px 16px;
+  }
+}
+
+@media (max-height: 630px) and (max-width: 560px) {
+  #telegramModal.telegram-auth-overlay { align-items: flex-start; overflow-y: auto; }
+  #telegramModal .telegram-auth-card { margin: 6px auto 14px; max-height: none; }
+  #telegramModal .telegram-auth-hero { padding-top: 20px; }
+  #telegramModal .telegram-auth-logo { width: 58px; height: 58px; margin-bottom: 10px; }
+  #telegramModal .telegram-auth-logo i { font-size: 29px; }
+  #telegramModal .telegram-auth-feature small { display: none; }
+}
