@@ -620,10 +620,7 @@ async function handleTestWelcome(message, senderId) {
   }
 
   if (!(await isTelegramGroupAdmin(chat.id, senderId))) {
-    await sendTelegramMessage(
-      chat.id,
-      "⛔ <b>Group admin access required.</b>",
-    );
+    // Restricted command: silently ignore non-admin users.
     return;
   }
 
@@ -705,15 +702,8 @@ async function handleMessage(message) {
   }
 
   if (!isTelegramAdmin(senderId)) {
-    await sendTelegramMessage(
-      chatId,
-      [
-        "⛔ <b>Admin access required</b>",
-        "",
-        `Your Telegram ID: <code>${escapeTelegramHtml(senderId)}</code>`,
-        "Only IDs configured in <code>TELEGRAM_ADMIN_IDS</code> can view user information.",
-      ].join("\n"),
-    );
+    // Admin-only commands are intentionally silent for non-admin users.
+    // This avoids exposing admin configuration or creating noise in groups.
     return;
   }
 
@@ -790,7 +780,8 @@ async function handleCallback(callbackQuery) {
   if (!senderId || !chatId) return;
 
   if (!isTelegramAdmin(senderId)) {
-    await answerTelegramCallback(callbackQuery.id, "Admin access required.");
+    // Stop the Telegram loading spinner without showing an access message.
+    await answerTelegramCallback(callbackQuery.id);
     return;
   }
 
