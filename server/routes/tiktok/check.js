@@ -1,4 +1,5 @@
 import { getSession } from "../_session.js";
+import { pythonTikTokCheckerEnabled, runPythonTikTokChecker } from "../_tiktok-python-checker.js";
 
 const PAGE_TIMEOUT_MS = 7000;
 const MEDIA_TIMEOUT_MS = 6000;
@@ -1018,6 +1019,74 @@ export default async function handler(req, res) {
 
     const body = readRequestBody(req);
     const requestedUrl = normalizeTikTokUrl(body.url);
+
+    if (pythonTikTokCheckerEnabled()) {
+      const oEmbedPromise = getOEmbed(requestedUrl);
+      try {
+        const report = await runPythonTikTokChecker(requestedUrl);
+        const oEmbed = await oEmbedPromise;
+        const bitrate = Number(report.video_bitrate_kbps) > 0
+          ? Math.round(Number(report.video_bitrate_kbps) * 1000)
+          : null;
+        const fileSize = Number(report.file_size_mb) > 0
+          ? Math.round(Number(report.file_size_mb) * 1024 * 1024)
+          : null;
+        const duration = Number(report.duration_seconds) > 0
+          ? Number(report.duration_seconds)
+          : null;
+        const fps = Number(report.fps) > 0 ? Number(report.fps) : null;
+        const width = Number(report.width) > 0 ? Number(report.width) : null;
+        const height = Number(report.height) > 0 ? Number(report.height) : null;
+
+        return res.status(200).json({
+          ok: true,
+          engine: "python",
+          video: {
+            id: oEmbed?.videoId || null,
+            url: requestedUrl,
+            title: oEmbed?.title || report.file_name || "TikTok video",
+            author: oEmbed?.author || null,
+            authorUrl: oEmbed?.authorUrl || null,
+            thumbnail: oEmbed?.thumbnail || null,
+            resolution: { width, height },
+            resolutionLabel: report.resolution_label || null,
+            bitrate,
+            overallBitrate: Number(report.overall_bitrate_kbps) > 0
+              ? Math.round(Number(report.overall_bitrate_kbps) * 1000)
+              : null,
+            fps,
+            fpsSource: fps ? "ffprobe" : null,
+            fpsExact: Boolean(fps),
+            duration,
+            fileSize,
+            codec: report.video_codec || null,
+            audioCodec: report.audio_codec || null,
+            pixelFormat: report.pixel_format || null,
+            qualityScore: report.quality_score || null,
+          },
+          availability: {
+            resolution: Boolean(width && height),
+            bitrate: Boolean(bitrate),
+            fps: Boolean(fps),
+            duration: Boolean(duration),
+            fileSize: Boolean(fileSize),
+            codec: Boolean(report.video_codec),
+            audioCodec: Boolean(report.audio_codec),
+            pixelFormat: Boolean(report.pixel_format),
+            qualityScore: Boolean(report.quality_score),
+          },
+          note: "Video was downloaded temporarily and analyzed with yt-dlp + ffprobe. Temporary files are removed automatically.",
+        });
+      } catch (pythonError) {
+        const strict = String(process.env.TIKTOK_CHECKER_PYTHON_STRICT || "false").toLowerCase() === "true";
+        console.warn("Python TikTok checker failed; using built-in web checker fallback:", {
+          message: pythonError?.message,
+          code: pythonError?.code,
+        });
+        if (strict) throw pythonError;
+      }
+    }
+
     const oEmbedPromise = getOEmbed(requestedUrl);
 
     let finalUrl = requestedUrl;

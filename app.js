@@ -1023,8 +1023,8 @@ function renderTikTokVideoResult(payload) {
     setElementText("videoCheckFps", formatCheckedFps(video.fps));
     const fpsSource = document.getElementById("videoCheckFpsSource");
     if (fpsSource) {
-        if (video.fpsSource === "mp4" && video.fps) {
-            fpsSource.textContent = "Detected from video";
+        if ((video.fpsSource === "mp4" || video.fpsSource === "ffprobe") && video.fps) {
+            fpsSource.textContent = video.fpsSource === "ffprobe" ? "Verified with ffprobe" : "Detected from video";
             fpsSource.hidden = false;
         } else if (video.fpsSource === "tiktok_metadata" && video.fps) {
             fpsSource.textContent = "TikTok metadata";
@@ -1042,6 +1042,13 @@ function renderTikTokVideoResult(payload) {
         "videoCheckFileSize",
         Number(video.fileSize) > 0 ? formatFileSize(Number(video.fileSize)) : "Unavailable",
     );
+    setElementText("videoCheckCodec", video.codec ? String(video.codec).toUpperCase() : "Unavailable");
+    setElementText(
+        "videoCheckAudioCodec",
+        video.audioCodec ? String(video.audioCodec).toUpperCase() : "Unavailable",
+    );
+    setElementText("videoCheckPixelFormat", video.pixelFormat || "Unavailable");
+    setElementText("videoCheckQuality", video.qualityScore || "Unavailable");
 
     const note = document.querySelector("#videoCheckNote span");
     if (note) {
