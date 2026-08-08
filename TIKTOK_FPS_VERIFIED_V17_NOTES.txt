@@ -1,7 +1,0 @@
-TheZiess Method - TikTok FPS Verified V17
-
-- Removed all caption and hashtag FPS detection.
-- FPS is now shown only when read from the MP4 video stream or TikTok technical metadata.
-- If TikTok hides FPS, the interface displays Unavailable instead of guessing.
-- Values such as #30fps, #60fps, #120fps, #1200fps or #6000fps in a caption are ignored.
-- Added clear labels for Detected from video and TikTok metadata.

@@ -215,7 +215,7 @@ let tiktokUploadPreviewUrl = null;
 
 const PLANS = {
     free: { id: "free", name: "FREE", price: "$0", durationLabel: "3 days", days: 3, adminOnly: false },
-    pro: { id: "pro", name: "PRO", price: "$3", durationLabel: "30 days", days: 30, adminOnly: true },
+    pro: { id: "pro", name: "PRO", price: "$2", durationLabel: "30 days", days: 30, adminOnly: true },
     premium: { id: "premium", name: "PREMIUM", price: "$5", durationLabel: "180 days", days: 180, adminOnly: true },
     max: { id: "max", name: "MAX", price: "$10", durationLabel: "1 year", days: 365, adminOnly: true },
 };
