@@ -10,6 +10,108 @@ const END_PROBE_BYTES = 4 * 1024 * 1024;
 const MAX_MOOV_BYTES = 10 * 1024 * 1024;
 const MAX_SUPPORTED_FPS = 10000;
 
+
+const EXTERNAL_CHECKER_BASE_URL = String(
+  process.env.TIKTOK_CHECKER_API_URL || "http://panel.peachygang.app:3008",
+).trim().replace(/\/$/, "");
+const EXTERNAL_CHECKER_API_KEY = String(process.env.TIKTOK_CHECKER_API_KEY || "").trim();
+const EXTERNAL_CHECKER_TIMEOUT_MS = Math.max(2000, Number(process.env.TIKTOK_CHECKER_PROXY_TIMEOUT_MS || 8000));
+
+function externalCheckerHeaders(extra = {}) {
+  const headers = { Accept: "application/json", ...extra };
+  if (EXTERNAL_CHECKER_API_KEY) {
+    headers.Authorization = `Bearer ${EXTERNAL_CHECKER_API_KEY}`;
+  }
+  return headers;
+}
+
+async function fetchExternalChecker(path, options = {}) {
+  if (!EXTERNAL_CHECKER_BASE_URL) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EXTERNAL_CHECKER_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${EXTERNAL_CHECKER_BASE_URL}${path}`, {
+      ...options,
+      headers: externalCheckerHeaders(options.headers || {}),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const text = await response.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+    if (!response.ok) {
+      const error = new Error(data?.error || `FPS checker returned HTTP ${response.status}`);
+      error.code = "EXTERNAL_FPS_CHECKER_ERROR";
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function startExternalFpsJob(url) {
+  return fetchExternalChecker("/api/check-video/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
+async function pollExternalFpsJob(jobId) {
+  return fetchExternalChecker(`/api/check-video/status?job_id=${encodeURIComponent(jobId)}`, {
+    method: "GET",
+  });
+}
+
+function externalResultPayload(result, requestedUrl, oEmbed = null) {
+  const width = Number(result?.width) || null;
+  const height = Number(result?.height) || null;
+  const fps = Number(result?.fps) || null;
+  const videoBitrateKbps = Number(result?.video_bitrate_kbps) || 0;
+  const overallBitrateKbps = Number(result?.overall_bitrate_kbps) || 0;
+  const duration = Number(result?.duration_seconds) || null;
+  const sizeMb = Number(result?.file_size_mb) || 0;
+  const bitrate = (videoBitrateKbps || overallBitrateKbps) > 0
+    ? Math.round((videoBitrateKbps || overallBitrateKbps) * 1000)
+    : null;
+  const fileSize = sizeMb > 0 ? Math.round(sizeMb * 1024 * 1024) : null;
+
+  return {
+    ok: true,
+    video: {
+      id: oEmbed?.videoId || null,
+      url: requestedUrl,
+      title: oEmbed?.title || "TikTok video",
+      author: oEmbed?.author || null,
+      authorUrl: oEmbed?.authorUrl || null,
+      thumbnail: oEmbed?.thumbnail || null,
+      resolution: { width, height },
+      bitrate,
+      fps,
+      fpsSource: fps ? "ffprobe" : null,
+      fpsExact: Boolean(fps),
+      duration,
+      fileSize,
+      codec: result?.video_codec || null,
+      audioCodec: result?.audio_codec || null,
+      pixelFormat: result?.pixel_format || null,
+      qualityScore: result?.quality_score || null,
+    },
+    availability: {
+      resolution: Boolean(width && height),
+      bitrate: Boolean(bitrate),
+      fps: Boolean(fps),
+      duration: Boolean(duration),
+      fileSize: Boolean(fileSize),
+    },
+    note: fps
+      ? "FPS was analyzed from the actual downloaded video stream with ffprobe on the checker server."
+      : "The checker server could not determine a real FPS value from the video stream.",
+  };
+}
+
 const BROWSER_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -1017,7 +1119,56 @@ export default async function handler(req, res) {
     }
 
     const body = readRequestBody(req);
+
+    // Poll a previously-started real-video analysis job. Each poll is fast,
+    // so it stays comfortably below the Vercel function timeout.
+    if (body.jobId) {
+      const requestedUrl = normalizeTikTokUrl(body.url);
+      const job = await pollExternalFpsJob(String(body.jobId));
+      if (job?.status === "queued" || job?.status === "processing") {
+        return res.status(202).json({
+          ok: true,
+          pending: true,
+          jobId: String(body.jobId),
+          status: job.status,
+        });
+      }
+      if (job?.status === "error") {
+        return res.status(422).json({
+          ok: false,
+          code: "REAL_FPS_ANALYSIS_FAILED",
+          error: job.error || "The real-video FPS checker failed.",
+        });
+      }
+      if (job?.status === "done" && job.result) {
+        const oEmbed = await getOEmbed(requestedUrl);
+        return res.status(200).json(externalResultPayload(job.result, requestedUrl, oEmbed));
+      }
+      return res.status(502).json({
+        ok: false,
+        code: "REAL_FPS_INVALID_JOB_RESPONSE",
+        error: "The FPS checker returned an invalid job status.",
+      });
+    }
+
     const requestedUrl = normalizeTikTokUrl(body.url);
+
+    // Prefer the hosted yt-dlp + ffprobe service. It returns immediately with
+    // a job id; the browser polls this same Vercel route for completion.
+    try {
+      const job = await startExternalFpsJob(requestedUrl);
+      if (job?.jobId) {
+        return res.status(202).json({
+          ok: true,
+          pending: true,
+          jobId: job.jobId,
+          status: job.status || "queued",
+        });
+      }
+    } catch (externalError) {
+      console.warn("External real-FPS checker unavailable; using metadata fallback:", externalError?.message);
+    }
+
     const oEmbedPromise = getOEmbed(requestedUrl);
 
     let finalUrl = requestedUrl;
@@ -1091,25 +1242,16 @@ export default async function handler(req, res) {
       fpsFromFrameCount,
     );
 
-    // Fallback requested by the product owner: estimate FPS from bitrate only
-    // when TikTok does not expose an actual frame rate. This is deliberately
-    // labelled as an estimate because bitrate alone cannot prove real FPS.
-    const estimatedFpsFromBitrate = !detectedFps && bitrate
-      ? (bitrate < 2_000_000 ? 30 : bitrate >= 16_000_000 ? 600 : 60)
-      : null;
-
-    const fps = detectedFps || estimatedFpsFromBitrate;
+    // Never guess FPS from bitrate. If the hosted ffprobe service is
+    // unavailable, only show FPS when TikTok/MP4 metadata actually exposes it.
+    const fps = detectedFps || null;
     const fpsSource = detectedFps
       ? (probe.metadata?.fps ? "mp4" : pageData.fpsSource || "tiktok_metadata")
-      : estimatedFpsFromBitrate
-        ? "bitrate_estimate"
-        : null;
+      : null;
 
     const fpsNote = detectedFps
-      ? "FPS was read from the TikTok video stream or TikTok's technical metadata. Captions and hashtags are never used."
-      : estimatedFpsFromBitrate
-        ? "TikTok did not expose real FPS metadata, so FPS was estimated from bitrate: under 2 Mbps = 30 FPS, 2 to under 16 Mbps = 60 FPS, and 16 Mbps or higher = 600 FPS."
-        : "TikTok did not expose verifiable FPS or bitrate metadata for this video.";
+      ? "FPS was read from the TikTok video stream or TikTok's technical metadata. Captions, hashtags, and bitrate are never used to guess FPS."
+      : "Real FPS is unavailable because the hosted ffprobe checker could not be reached and TikTok did not expose verifiable frame-rate metadata.";
 
     return res.status(200).json({
       ok: true,

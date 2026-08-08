@@ -1035,14 +1035,14 @@ function renderTikTokVideoResult(payload) {
     setElementText("videoCheckFps", formatCheckedFps(video.fps));
     const fpsSource = document.getElementById("videoCheckFpsSource");
     if (fpsSource) {
-        if (video.fpsSource === "mp4" && video.fps) {
+        if (video.fpsSource === "ffprobe" && video.fps) {
+            fpsSource.textContent = "Analyzed from video stream";
+            fpsSource.hidden = false;
+        } else if (video.fpsSource === "mp4" && video.fps) {
             fpsSource.textContent = "Detected from video";
             fpsSource.hidden = false;
         } else if (video.fpsSource === "tiktok_metadata" && video.fps) {
             fpsSource.textContent = "TikTok metadata";
-            fpsSource.hidden = false;
-        } else if (video.fpsSource === "bitrate_estimate" && video.fps) {
-            fpsSource.textContent = "Estimated from bitrate";
             fpsSource.hidden = false;
         } else {
             fpsSource.textContent = "";
@@ -1146,28 +1146,51 @@ function initializeTikTokVideoChecker() {
         );
 
         try {
-            const response = await fetch("/api/tiktok/check", {
-                method: "POST",
-                credentials: "same-origin",
-                cache: "no-store",
-                headers: {
-                    "Content-Type": "application/json",
-                    Accept: "application/json",
-                },
-                body: JSON.stringify({ url }),
-            });
+            const requestCheck = async (payload) => {
+                const response = await fetch("/api/tiktok/check", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                });
+                const rawBody = await response.text();
+                let data = {};
+                try {
+                    data = rawBody ? JSON.parse(rawBody) : {};
+                } catch {
+                    throw new Error("The server returned an invalid TikTok check response.");
+                }
+                if (!response.ok || !data.ok) {
+                    const code = data.code ? ` (${data.code})` : "";
+                    throw new Error(`${data.error || "Unable to inspect this TikTok video."}${code}`);
+                }
+                return data;
+            };
 
-            const rawBody = await response.text();
-            let data = {};
-            try {
-                data = rawBody ? JSON.parse(rawBody) : {};
-            } catch {
-                throw new Error("The server returned an invalid TikTok check response.");
-            }
+            let data = await requestCheck({ url });
 
-            if (!response.ok || !data.ok) {
-                const code = data.code ? ` (${data.code})` : "";
-                throw new Error(`${data.error || "Unable to inspect this TikTok video."}${code}`);
+            // Real FPS analysis runs on the hosted bot server. Poll the Vercel
+            // proxy so the browser never connects to an insecure HTTP port.
+            if (data.pending && data.jobId) {
+                const startedAt = Date.now();
+                const maxWaitMs = 6 * 60 * 1000;
+                while (data.pending) {
+                    if (Date.now() - startedAt > maxWaitMs) {
+                        throw new Error("Real video analysis timed out. Please try again.");
+                    }
+                    setVideoCheckStatus(
+                        data.status === "processing"
+                            ? "Analyzing the real video stream with ffprobe..."
+                            : "Waiting for the real-video analyzer...",
+                        "loading",
+                    );
+                    await new Promise((resolve) => setTimeout(resolve, 2000));
+                    data = await requestCheck({ url, jobId: data.jobId });
+                }
             }
 
             renderTikTokVideoResult(data);
