@@ -51,5 +51,8 @@
     "api/router.js": {
       "maxDuration": 30
     }
-  }
+  },
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
 }
