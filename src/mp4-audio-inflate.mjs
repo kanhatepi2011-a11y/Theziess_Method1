@@ -1,472 +1,424 @@
+#!/usr/bin/env node
 /**
- * Audio-inflation MP4 patcher — v2.3 (browser/Web Worker port)
- *
- * Ported from the user's Node/CommonJS v2.3 patcher so it can run inside the
- * existing Vite/Web Worker pipeline without fs/require/process.
- *
- * Behavior kept from v2.3:
- * - Output movie/media duration is left unchanged (mdhd/mvhd are not patched).
- * - Audio sample tables stsz/stsc/stco/stts are inflated.
- * - Existing video ctts/stss are kept; missing ones are synthesized.
- * - Audio edts is removed while rebuilding the audio track.
- * - co64 is intentionally rejected, matching the supplied v2.3 script.
+ * Audio-inflation MP4 patcher — v2.3
+ * - Duration of output = same as original video
+ * - Only sample tables are inflated (stsz/stsc/stco/stts)
+ * - mdhd and mvhd durations are NOT changed
  */
+'use strict';
+
+const fs   = require('fs');
+const path = require('path');
 
 const ri = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 
 const CONTAINERS = new Set([
-    "moov", "trak", "mdia", "minf", "stbl", "edts",
-    "dinf", "udta", "meta", "ilst", "moof", "traf",
+  'moov', 'trak', 'mdia', 'minf', 'stbl', 'edts',
+  'dinf', 'udta', 'meta', 'ilst', 'moof', 'traf'
 ]);
 
-function asBytes(input) {
-    if (input instanceof Uint8Array) return input;
-    if (input instanceof ArrayBuffer) return new Uint8Array(input);
-    if (ArrayBuffer.isView(input)) {
-        return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+function readBox(buf, o, end) {
+  if (o + 8 > end) throw new Error(`Truncated box header @${o}`);
+  let size = buf.readUInt32BE(o);
+  const type = buf.toString('latin1', o + 4, o + 8);
+  let hs = 8;
+  if (size === 1) {
+    const hi = buf.readUInt32BE(o + 8);
+    const lo = buf.readUInt32BE(o + 12);
+    size = hi * 0x100000000 + lo;
+    hs = 16;
+  } else if (size === 0) {
+    size = end - o;
+  }
+  if (size < hs || o + size > end) {
+    throw new Error(`Bad box size for '${type}' @${o}: ${size}`);
+  }
+  return {
+    type, offset: o, size, hs,
+    cStart: o + hs, end: o + size,
+    pStart: o + hs, pEnd: o + hs,
+    children: []
+  };
+}
+
+function parseBoxes(buf, start = 0, end = null) {
+  if (end === null) end = buf.length;
+  const boxes = [];
+  let o = start;
+  while (o + 8 <= end) {
+    const box = readBox(buf, o, end);
+    if (CONTAINERS.has(box.type)) {
+      const cs = box.type === 'meta' ? box.cStart + 4 : box.cStart;
+      box.pStart = box.cStart;
+      box.pEnd   = cs;
+      box.children = parseBoxes(buf, cs, box.end);
     }
-    throw new TypeError("Expected ArrayBuffer or Uint8Array");
-}
-
-function viewOf(bytes) {
-    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-}
-
-function readU32(bytes, offset) {
-    return viewOf(bytes).getUint32(offset, false);
-}
-
-function writeU32(bytes, offset, value) {
-    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
-        throw new RangeError(`32-bit MP4 value out of range: ${value}`);
-    }
-    viewOf(bytes).setUint32(offset, value, false);
-}
-
-function readType(bytes, offset) {
-    return String.fromCharCode(
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    );
-}
-
-function writeType(bytes, offset, type) {
-    for (let i = 0; i < 4; i++) bytes[offset + i] = type.charCodeAt(i) & 0xff;
-}
-
-function readBox(bytes, offset, end) {
-    if (offset + 8 > end) throw new Error(`Truncated box header @${offset}`);
-
-    let size = readU32(bytes, offset);
-    const type = readType(bytes, offset + 4);
-    let headerSize = 8;
-
-    if (size === 1) {
-        if (offset + 16 > end) throw new Error(`Truncated large box header @${offset}`);
-        const hi = readU32(bytes, offset + 8);
-        const lo = readU32(bytes, offset + 12);
-        size = hi * 0x100000000 + lo;
-        headerSize = 16;
-    } else if (size === 0) {
-        size = end - offset;
-    }
-
-    if (!Number.isSafeInteger(size) || size < headerSize || offset + size > end) {
-        throw new Error(`Bad box size for '${type}' @${offset}: ${size}`);
-    }
-
-    return {
-        type,
-        offset,
-        size,
-        headerSize,
-        contentStart: offset + headerSize,
-        end: offset + size,
-        prefixStart: offset + headerSize,
-        prefixEnd: offset + headerSize,
-        children: [],
-    };
-}
-
-function parseBoxes(bytes, start = 0, end = bytes.byteLength) {
-    const boxes = [];
-    let offset = start;
-
-    while (offset + 8 <= end) {
-        const box = readBox(bytes, offset, end);
-        if (CONTAINERS.has(box.type)) {
-            const childStart = box.type === "meta" ? box.contentStart + 4 : box.contentStart;
-            box.prefixStart = box.contentStart;
-            box.prefixEnd = childStart;
-            box.children = parseBoxes(bytes, childStart, box.end);
-        }
-        boxes.push(box);
-        offset = box.end;
-    }
-
-    return boxes;
+    boxes.push(box);
+    o = box.end;
+  }
+  return boxes;
 }
 
 function findChild(box, type) {
-    return box.children.find((child) => child.type === type) || null;
+  return box.children.find(c => c.type === type) || null;
 }
-
 function findDesc(box, path) {
-    let current = box;
-    for (const type of path) {
-        current = findChild(current, type);
-        if (!current) return null;
-    }
-    return current;
+  let cur = box;
+  for (const t of path) {
+    cur = findChild(cur, t);
+    if (!cur) return null;
+  }
+  return cur;
 }
 
-function concatBytes(parts) {
-    const normalized = parts.map((part) => asBytes(part));
-    const total = normalized.reduce((sum, part) => sum + part.byteLength, 0);
-    const out = new Uint8Array(total);
-    let cursor = 0;
-    for (const part of normalized) {
-        out.set(part, cursor);
-        cursor += part.byteLength;
-    }
-    return out;
+function makeBox(type, payload) {
+  const size = 8 + payload.length;
+  const buf  = Buffer.allocUnsafe(size);
+  buf.writeUInt32BE(size, 0);
+  buf.write(type, 4, 4, 'latin1');
+  payload.copy(buf, 8);
+  return buf;
 }
 
-function makeBox(type, payloadInput) {
-    const payload = asBytes(payloadInput);
-    const size = 8 + payload.byteLength;
-    if (size > 0xffffffff) throw new Error(`Box '${type}' exceeds 32-bit size limit`);
-    const out = new Uint8Array(size);
-    writeU32(out, 0, size);
-    writeType(out, 4, type);
-    out.set(payload, 8);
-    return out;
+function cat(parts) {
+  return Buffer.concat(parts.map(p => Buffer.isBuffer(p) ? p : Buffer.from(p)));
 }
 
-function parseStsz(box, bytes) {
-    const defaultSize = readU32(bytes, box.contentStart + 4);
-    const count = readU32(bytes, box.contentStart + 8);
-
-    if (defaultSize !== 0) return Array(count).fill(defaultSize);
-
-    const required = box.contentStart + 12 + count * 4;
-    if (required > box.end) throw new Error("Invalid stsz table");
-
-    const out = new Array(count);
-    for (let i = 0; i < count; i++) {
-        out[i] = readU32(bytes, box.contentStart + 12 + i * 4);
-    }
-    return out;
+function parseStsz(box, buf) {
+  const defSz = buf.readUInt32BE(box.cStart + 4);
+  const count = buf.readUInt32BE(box.cStart + 8);
+  if (defSz !== 0) return Array(count).fill(defSz);
+  const out = new Array(count);
+  for (let i = 0; i < count; i++) {
+    out[i] = buf.readUInt32BE(box.cStart + 12 + i * 4);
+  }
+  return out;
 }
 
-function parseStco(box, bytes) {
-    const count = readU32(bytes, box.contentStart + 4);
-    const required = box.contentStart + 8 + count * 4;
-    if (required > box.end) throw new Error("Invalid stco table");
-
-    const out = new Array(count);
-    for (let i = 0; i < count; i++) {
-        out[i] = readU32(bytes, box.contentStart + 8 + i * 4);
-    }
-    return out;
+function parseStco(box, buf) {
+  const count = buf.readUInt32BE(box.cStart + 4);
+  const out = new Array(count);
+  for (let i = 0; i < count; i++) {
+    out[i] = buf.readUInt32BE(box.cStart + 8 + i * 4);
+  }
+  return out;
 }
 
-function parseStsc(box, bytes) {
-    const count = readU32(bytes, box.contentStart + 4);
-    const required = box.contentStart + 8 + count * 12;
-    if (required > box.end) throw new Error("Invalid stsc table");
-
-    const out = new Array(count);
-    for (let i = 0; i < count; i++) {
-        const offset = box.contentStart + 8 + i * 12;
-        out[i] = [
-            readU32(bytes, offset),
-            readU32(bytes, offset + 4),
-            readU32(bytes, offset + 8),
-        ];
-    }
-    return out;
+function parseStsc(box, buf) {
+  const count = buf.readUInt32BE(box.cStart + 4);
+  const out = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const o = box.cStart + 8 + i * 12;
+    out[i] = [
+      buf.readUInt32BE(o),
+      buf.readUInt32BE(o + 4),
+      buf.readUInt32BE(o + 8)
+    ];
+  }
+  return out;
 }
 
-function buildCtts(realCount, frameDuration) {
-    const groupCount = ri(6, 10);
-    const perGroup = Math.floor(realCount / groupCount);
-    const entries = [];
-    let remaining = realCount;
-
-    for (let group = 0; group < groupCount; group++) {
-        const count = group === groupCount - 1 ? remaining : perGroup;
-        remaining -= count;
-        entries.push([count, ri(0, 2) * frameDuration]);
-    }
-
-    const payload = new Uint8Array(8 + entries.length * 8);
-    writeU32(payload, 4, entries.length);
-    entries.forEach(([count, offset], index) => {
-        writeU32(payload, 8 + index * 8, count);
-        writeU32(payload, 12 + index * 8, offset);
-    });
-    return makeBox("ctts", payload);
+function buildCtts(realCount, frameDur) {
+  const numGroups = ri(6, 10);
+  const perGroup  = Math.floor(realCount / numGroups);
+  const entries   = [];
+  let rem = realCount;
+  for (let g = 0; g < numGroups; g++) {
+    const cnt = g === numGroups - 1 ? rem : perGroup;
+    rem -= cnt;
+    entries.push([cnt, ri(0, 2) * frameDur]);
+  }
+  const p = Buffer.alloc(8 + entries.length * 8);
+  p.writeUInt32BE(entries.length, 4);
+  entries.forEach(([c, o], i) => {
+    p.writeUInt32BE(c, 8 + i * 8);
+    p.writeUInt32BE(o, 12 + i * 8);
+  });
+  return makeBox('ctts', p);
 }
 
 function buildStss(realCount, fps) {
-    const step = Math.max(1, Math.min(realCount, ri(fps, fps * 2)));
-    const keys = [];
-    for (let i = 1; i <= realCount; i += step) keys.push(i);
-
-    const payload = new Uint8Array(8 + keys.length * 4);
-    writeU32(payload, 4, keys.length);
-    keys.forEach((key, index) => writeU32(payload, 8 + index * 4, key));
-    return makeBox("stss", payload);
+  const step = Math.max(1, Math.min(realCount, ri(fps, fps * 2)));
+  const keys = [];
+  for (let i = 1; i <= realCount; i += step) keys.push(i);
+  const p = Buffer.alloc(8 + keys.length * 4);
+  p.writeUInt32BE(keys.length, 4);
+  keys.forEach((k, i) => p.writeUInt32BE(k, 8 + i * 4));
+  return makeBox('stss', p);
 }
 
-export function patchAudioInflationMp4(input, options = {}) {
-    const bytes = asBytes(input);
+function patch(buf, opts = {}) {
+  const factor   = opts.factor  ?? ri(8, 12);
+  const baseSize = opts.baseSize ?? ri(60, 100);
+  const seed     = opts.seed    ?? ri(0, 255);
+  const verbose  = !!opts.verbose;
 
-    // Accept both the v2.3 CLI option names and the website's previous names.
-    const requestedFactor = options.factor ?? options.multiplier;
-    const factor = Number.isFinite(requestedFactor)
-        ? Math.max(1, Math.floor(requestedFactor))
-        : ri(8, 12);
+  const boxes = parseBoxes(buf);
+  const ftyp  = boxes.find(b => b.type === 'ftyp');
+  const moov  = boxes.find(b => b.type === 'moov');
+  const mdat  = boxes.find(b => b.type === 'mdat');
+  if (!ftyp || !moov || !mdat) {
+    throw new Error('Missing required top-level boxes (ftyp / moov / mdat)');
+  }
 
-    const requestedBaseSize = options.baseSize ?? options.baseAudioSize;
-    const baseSize = Number.isFinite(requestedBaseSize)
-        ? Math.max(1, Math.floor(requestedBaseSize))
-        : ri(60, 100);
+  let vTrak = null, aTrak = null;
+  for (const c of moov.children) {
+    if (c.type !== 'trak') continue;
+    const hdlr = findDesc(c, ['mdia', 'hdlr']);
+    if (!hdlr) continue;
+    const handler = buf.toString('latin1', hdlr.cStart + 8, hdlr.cStart + 12);
+    if (handler === 'vide') vTrak = c;
+    else if (handler === 'soun') aTrak = c;
+  }
+  if (!vTrak) throw new Error('No video track found');
+  if (!aTrak) throw new Error('No audio track found');
 
-    const seed = Number.isFinite(options.seed)
-        ? Math.max(0, Math.min(255, Math.floor(options.seed)))
-        : ri(0, 255);
+  const vStbl = findDesc(vTrak, ['mdia', 'minf', 'stbl']);
+  if (!vStbl) throw new Error('Missing video stbl');
+  if (findChild(vStbl, 'co64')) throw new Error('co64 not supported — remux first');
 
-    const boxes = parseBoxes(bytes);
-    const ftyp = boxes.find((box) => box.type === "ftyp");
-    const moov = boxes.find((box) => box.type === "moov");
-    const mdat = boxes.find((box) => box.type === "mdat");
+  const vMdhd = findDesc(vTrak, ['mdia', 'mdhd']);
+  const vStsz = findChild(vStbl, 'stsz');
+  if (!vMdhd || !vStsz) throw new Error('Missing video mdhd/stsz');
 
-    if (!ftyp || !moov || !mdat) {
-        throw new Error("Missing required top-level boxes (ftyp / moov / mdat)");
+  const vTimescale = buf.readUInt32BE(vMdhd.cStart + 12);
+  const realVCount = parseStsz(vStsz, buf).length;
+
+  const vStts = findChild(vStbl, 'stts');
+  let vFrameDur = Math.max(1, Math.floor(vTimescale / 30));
+  if (vStts && buf.readUInt32BE(vStts.cStart + 4) > 0) {
+    vFrameDur = buf.readUInt32BE(vStts.cStart + 12);
+  }
+  const vFps = Math.max(1, Math.round(vTimescale / vFrameDur));
+
+  const aStbl = findDesc(aTrak, ['mdia', 'minf', 'stbl']);
+  if (!aStbl) throw new Error('Missing audio stbl');
+  if (findChild(aStbl, 'co64')) throw new Error('co64 not supported — remux first');
+
+  const aStsz = findChild(aStbl, 'stsz');
+  const aStco = findChild(aStbl, 'stco');
+  const aStsc = findChild(aStbl, 'stsc');
+  const aStts = findChild(aStbl, 'stts');
+  const aMdhd = findDesc(aTrak, ['mdia', 'mdhd']);
+  if (!aStsz || !aStco || !aStsc || !aMdhd) {
+    throw new Error('Missing audio stsz/stco/stsc/mdhd');
+  }
+
+  const realASizes   = parseStsz(aStsz, buf);
+  const realAOffsets = parseStco(aStco, buf);
+  const realARows    = parseStsc(aStsc, buf);
+  const realACount   = realASizes.length;
+  const fakeACount   = Math.floor(realACount * factor);
+
+  if (verbose) {
+    console.log(`[*] Audio samples: ${realACount} → ${realACount + fakeACount} (×${factor})`);
+  }
+
+  const fakeASizes = Array.from({ length: fakeACount }, () => baseSize + ri(0, 60));
+  const fakeAChunks = fakeASizes.map((sz, i) => {
+    const chunk = Buffer.allocUnsafe(sz);
+    for (let j = 0; j < sz; j++) {
+      chunk[j] = ((seed + i * 23 + j * 41) ^ (i * 7 + j)) & 0xff;
     }
+    return chunk;
+  });
+  const fakeAPayload = Buffer.concat(fakeAChunks);
 
-    let videoTrack = null;
-    let audioTrack = null;
-    for (const child of moov.children) {
-        if (child.type !== "trak") continue;
-        const hdlr = findDesc(child, ["mdia", "hdlr"]);
-        if (!hdlr) continue;
-        const handler = readType(bytes, hdlr.contentStart + 8);
-        if (handler === "vide") videoTrack = child;
-        else if (handler === "soun") audioTrack = child;
+  const fixed = new Map();
+
+  // stsz
+  {
+    const all = [...realASizes, ...fakeASizes];
+    const p = Buffer.alloc(12 + all.length * 4);
+    p.writeUInt32BE(0, 0);
+    p.writeUInt32BE(0, 4);
+    p.writeUInt32BE(all.length, 8);
+    all.forEach((sz, i) => p.writeUInt32BE(sz, 12 + i * 4));
+    fixed.set(aStsz, makeBox('stsz', p));
+  }
+
+  // stsc
+  {
+    const rows = realARows.map(r => [...r]);
+    if (rows.length === 0 || rows[rows.length - 1][1] !== 1) {
+      rows.push([realAOffsets.length + 1, 1, 1]);
     }
-
-    if (!videoTrack) throw new Error("No video track found");
-    if (!audioTrack) throw new Error("No audio track found");
-
-    const videoStbl = findDesc(videoTrack, ["mdia", "minf", "stbl"]);
-    if (!videoStbl) throw new Error("Missing video stbl");
-    if (findChild(videoStbl, "co64")) throw new Error("co64 not supported — remux first");
-
-    const videoMdhd = findDesc(videoTrack, ["mdia", "mdhd"]);
-    const videoStsz = findChild(videoStbl, "stsz");
-    if (!videoMdhd || !videoStsz) throw new Error("Missing video mdhd/stsz");
-
-    const videoTimescale = readU32(bytes, videoMdhd.contentStart + 12);
-    const realVideoCount = parseStsz(videoStsz, bytes).length;
-
-    const videoStts = findChild(videoStbl, "stts");
-    let videoFrameDuration = Math.max(1, Math.floor(videoTimescale / 30));
-    if (videoStts && readU32(bytes, videoStts.contentStart + 4) > 0) {
-        videoFrameDuration = readU32(bytes, videoStts.contentStart + 12);
-    }
-    const videoFps = Math.max(1, Math.round(videoTimescale / videoFrameDuration));
-
-    const audioStbl = findDesc(audioTrack, ["mdia", "minf", "stbl"]);
-    if (!audioStbl) throw new Error("Missing audio stbl");
-    if (findChild(audioStbl, "co64")) throw new Error("co64 not supported — remux first");
-
-    const audioStsz = findChild(audioStbl, "stsz");
-    const audioStco = findChild(audioStbl, "stco");
-    const audioStsc = findChild(audioStbl, "stsc");
-    const audioStts = findChild(audioStbl, "stts");
-    const audioMdhd = findDesc(audioTrack, ["mdia", "mdhd"]);
-
-    if (!audioStsz || !audioStco || !audioStsc || !audioMdhd) {
-        throw new Error("Missing audio stsz/stco/stsc/mdhd");
-    }
-
-    const realAudioSizes = parseStsz(audioStsz, bytes);
-    const realAudioOffsets = parseStco(audioStco, bytes);
-    const realAudioRows = parseStsc(audioStsc, bytes);
-    const realAudioCount = realAudioSizes.length;
-    const fakeAudioCount = Math.floor(realAudioCount * factor);
-
-    const fakeAudioSizes = Array.from(
-        { length: fakeAudioCount },
-        () => baseSize + ri(0, 60),
-    );
-
-    const fakeAudioChunks = fakeAudioSizes.map((size, i) => {
-        const chunk = new Uint8Array(size);
-        for (let j = 0; j < size; j++) {
-            chunk[j] = ((seed + i * 23 + j * 41) ^ (i * 7 + j)) & 0xff;
-        }
-        return chunk;
+    const p = Buffer.alloc(8 + rows.length * 12);
+    p.writeUInt32BE(0, 0);
+    p.writeUInt32BE(rows.length, 4);
+    rows.forEach((r, i) => {
+      p.writeUInt32BE(r[0],  8 + i * 12);
+      p.writeUInt32BE(r[1], 12 + i * 12);
+      p.writeUInt32BE(r[2], 16 + i * 12);
     });
-    const fakeAudioPayload = concatBytes(fakeAudioChunks);
+    fixed.set(aStsc, makeBox('stsc', p));
+  }
 
-    const fixed = new Map();
-
-    // stsz
-    {
-        const allSizes = [...realAudioSizes, ...fakeAudioSizes];
-        const payload = new Uint8Array(12 + allSizes.length * 4);
-        writeU32(payload, 0, 0);
-        writeU32(payload, 4, 0);
-        writeU32(payload, 8, allSizes.length);
-        allSizes.forEach((size, i) => writeU32(payload, 12 + i * 4, size));
-        fixed.set(audioStsz, makeBox("stsz", payload));
+  // stts (still extend the sample count, but we do NOT touch mdhd duration)
+  let aDelta = 0;
+  if (aStts) {
+    const entryCount = buf.readUInt32BE(aStts.cStart + 4);
+    if (entryCount > 0) {
+      aDelta = buf.readUInt32BE(aStts.cStart + 12 + (entryCount - 1) * 8);
     }
+  }
+  if (aDelta <= 0) {
+    const aTimescale = buf.readUInt32BE(aMdhd.cStart + 12);
+    aDelta = Math.max(1, Math.round(aTimescale / 43));
+  }
 
-    // stsc
-    {
-        const rows = realAudioRows.map((row) => [...row]);
-        if (rows.length === 0 || rows[rows.length - 1][1] !== 1) {
-            rows.push([realAudioOffsets.length + 1, 1, 1]);
-        }
-
-        const payload = new Uint8Array(8 + rows.length * 12);
-        writeU32(payload, 0, 0);
-        writeU32(payload, 4, rows.length);
-        rows.forEach((row, i) => {
-            writeU32(payload, 8 + i * 12, row[0]);
-            writeU32(payload, 12 + i * 12, row[1]);
-            writeU32(payload, 16 + i * 12, row[2]);
-        });
-        fixed.set(audioStsc, makeBox("stsc", payload));
+  if (aStts && fakeACount > 0) {
+    const entryCount = buf.readUInt32BE(aStts.cStart + 4);
+    const p = Buffer.alloc(8 + (entryCount + 1) * 8);
+    buf.copy(p, 0, aStts.cStart, aStts.cStart + 4);
+    p.writeUInt32BE(entryCount + 1, 4);
+    for (let i = 0; i < entryCount; i++) {
+      p.writeUInt32BE(buf.readUInt32BE(aStts.cStart +  8 + i * 8),  8 + i * 8);
+      p.writeUInt32BE(buf.readUInt32BE(aStts.cStart + 12 + i * 8), 12 + i * 8);
     }
+    p.writeUInt32BE(fakeACount,  8 + entryCount * 8);
+    p.writeUInt32BE(aDelta,     12 + entryCount * 8);
+    fixed.set(aStts, makeBox('stts', p));
+  }
 
-    // stts is extended, but mdhd/mvhd durations are intentionally untouched.
-    let audioDelta = 0;
-    if (audioStts) {
-        const entryCount = readU32(bytes, audioStts.contentStart + 4);
-        if (entryCount > 0) {
-            audioDelta = readU32(bytes, audioStts.contentStart + 12 + (entryCount - 1) * 8);
-        }
+  // ===== IMPORTANT =====
+  // We do NOT change mdhd duration or mvhd duration
+  // → Output duration stays exactly the same as original video
+  // =====================
+
+  const existingCtts = findChild(vStbl, 'ctts');
+  const existingStss = findChild(vStbl, 'stss');
+  const newCtts = existingCtts ? null : buildCtts(realVCount, vFrameDur);
+  const newStss = existingStss ? null : buildStss(realVCount, vFps);
+
+  function buildStcoRep(stcoBox, delta, fakeOffsets) {
+    const orig = parseStco(stcoBox, buf);
+    const isAudio = stcoBox === aStco;
+    const total = orig.length + (isAudio ? fakeACount : 0);
+    const p = Buffer.alloc(8 + total * 4);
+    p.writeUInt32BE(0, 0);
+    p.writeUInt32BE(total, 4);
+    orig.forEach((off, i) => p.writeUInt32BE(off + delta, 8 + i * 4));
+    if (isAudio && fakeOffsets) {
+      fakeOffsets.forEach((off, i) => {
+        p.writeUInt32BE(off, 8 + (orig.length + i) * 4);
+      });
     }
+    return makeBox('stco', p);
+  }
 
-    if (audioDelta <= 0) {
-        const audioTimescale = readU32(bytes, audioMdhd.contentStart + 12);
-        audioDelta = Math.max(1, Math.round(audioTimescale / 43));
+  const allStcos = [];
+  for (const t of moov.children) {
+    if (t.type !== 'trak') continue;
+    const st = findDesc(t, ['mdia', 'minf', 'stbl']);
+    if (st) {
+      const sc = findChild(st, 'stco');
+      if (sc) allStcos.push(sc);
     }
+  }
 
-    if (audioStts && fakeAudioCount > 0) {
-        const entryCount = readU32(bytes, audioStts.contentStart + 4);
-        const payload = new Uint8Array(8 + (entryCount + 1) * 8);
-        payload.set(bytes.slice(audioStts.contentStart, audioStts.contentStart + 4), 0);
-        writeU32(payload, 4, entryCount + 1);
-
-        for (let i = 0; i < entryCount; i++) {
-            writeU32(payload, 8 + i * 8, readU32(bytes, audioStts.contentStart + 8 + i * 8));
-            writeU32(payload, 12 + i * 8, readU32(bytes, audioStts.contentStart + 12 + i * 8));
-        }
-
-        writeU32(payload, 8 + entryCount * 8, fakeAudioCount);
-        writeU32(payload, 12 + entryCount * 8, audioDelta);
-        fixed.set(audioStts, makeBox("stts", payload));
+  function rebuild(box, rep) {
+    if (rep.has(box)) return rep.get(box);
+    if (box.children.length === 0) {
+      return buf.slice(box.offset, box.end);
     }
-
-    const existingCtts = findChild(videoStbl, "ctts");
-    const existingStss = findChild(videoStbl, "stss");
-    const newCtts = existingCtts ? null : buildCtts(realVideoCount, videoFrameDuration);
-    const newStss = existingStss ? null : buildStss(realVideoCount, videoFps);
-
-    function buildStcoReplacement(stcoBox, delta, fakeOffsets) {
-        const original = parseStco(stcoBox, bytes);
-        const isAudio = stcoBox === audioStco;
-        const total = original.length + (isAudio ? fakeAudioCount : 0);
-        const payload = new Uint8Array(8 + total * 4);
-        writeU32(payload, 0, 0);
-        writeU32(payload, 4, total);
-
-        original.forEach((offset, i) => writeU32(payload, 8 + i * 4, offset + delta));
-        if (isAudio && fakeOffsets) {
-            fakeOffsets.forEach((offset, i) => {
-                writeU32(payload, 8 + (original.length + i) * 4, offset);
-            });
-        }
-        return makeBox("stco", payload);
+    const parts = [buf.slice(box.pStart, box.pEnd)];
+    for (const c of box.children) {
+      if (box === aTrak && c.type === 'edts') continue;
+      parts.push(rebuild(c, rep));
     }
-
-    const allStcos = [];
-    for (const track of moov.children) {
-        if (track.type !== "trak") continue;
-        const stbl = findDesc(track, ["mdia", "minf", "stbl"]);
-        if (!stbl) continue;
-        const stco = findChild(stbl, "stco");
-        if (stco) allStcos.push(stco);
+    if (box === vStbl) {
+      if (newCtts) parts.push(newCtts);
+      if (newStss) parts.push(newStss);
     }
+    return makeBox(box.type, cat(parts));
+  }
 
-    function rebuild(box, replacements) {
-        if (replacements.has(box)) return replacements.get(box);
-        if (box.children.length === 0) return bytes.slice(box.offset, box.end);
+  // Pass 1
+  const rep1 = new Map(fixed);
+  for (const s of allStcos) rep1.set(s, buildStcoRep(s, 0, null));
+  const moov1 = rebuild(moov, rep1);
 
-        const parts = [bytes.slice(box.prefixStart, box.prefixEnd)];
-        for (const child of box.children) {
-            if (box === audioTrack && child.type === "edts") continue;
-            parts.push(rebuild(child, replacements));
-        }
+  const otherTop = boxes
+    .filter(b => !['ftyp', 'moov', 'mdat'].includes(b.type))
+    .map(b => buf.slice(b.offset, b.end));
 
-        if (box === videoStbl) {
-            if (newCtts) parts.push(newCtts);
-            if (newStss) parts.push(newStss);
-        }
+  const oMdatPayload = buf.slice(mdat.cStart, mdat.end);
+  const nStart = ftyp.size + moov1.length + Buffer.concat(otherTop).length + 8;
+  const delta  = nStart - mdat.cStart;
 
-        return makeBox(box.type, concatBytes(parts));
-    }
+  const fakeAOffsets = [];
+  let cursor = nStart + oMdatPayload.length;
+  for (const sz of fakeASizes) {
+    fakeAOffsets.push(cursor);
+    cursor += sz;
+  }
 
-    // Pass 1: measure rebuilt moov size.
-    const passOne = new Map(fixed);
-    for (const stco of allStcos) {
-        passOne.set(stco, buildStcoReplacement(stco, 0, null));
-    }
-    const measuredMoov = rebuild(moov, passOne);
+  // Pass 2
+  const repFinal = new Map(fixed);
+  for (const s of allStcos) {
+    repFinal.set(s, buildStcoRep(s, delta, fakeAOffsets));
+  }
 
-    const otherTop = boxes
-        .filter((box) => !["ftyp", "moov", "mdat"].includes(box.type))
-        .map((box) => bytes.slice(box.offset, box.end));
-    const preservedTop = concatBytes(otherTop);
-
-    const originalMdatPayload = bytes.slice(mdat.contentStart, mdat.end);
-    const newMdatPayloadStart = ftyp.size + measuredMoov.byteLength + preservedTop.byteLength + 8;
-    const delta = newMdatPayloadStart - mdat.contentStart;
-
-    const fakeAudioOffsets = [];
-    let cursor = newMdatPayloadStart + originalMdatPayload.byteLength;
-    for (const size of fakeAudioSizes) {
-        fakeAudioOffsets.push(cursor);
-        cursor += size;
-    }
-
-    // Pass 2: write final chunk offsets.
-    const finalReplacements = new Map(fixed);
-    for (const stco of allStcos) {
-        finalReplacements.set(stco, buildStcoReplacement(stco, delta, fakeAudioOffsets));
-    }
-
-    const output = concatBytes([
-        bytes.slice(ftyp.offset, ftyp.end),
-        rebuild(moov, finalReplacements),
-        ...otherTop,
-        makeBox("mdat", concatBytes([originalMdatPayload, fakeAudioPayload])),
-    ]);
-
-    return {
-        newBuffer: output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength),
-        newBytes: output,
-        multiplier: factor,
-        factor,
-        fakeAudioCount,
-        seed,
-    };
+  return cat([
+    buf.slice(ftyp.offset, ftyp.end),
+    rebuild(moov, repFinal),
+    ...otherTop,
+    makeBox('mdat', cat([oMdatPayload, fakeAPayload]))
+  ]);
 }
+
+// ─── CLI ────────────────────────────────────────────────────────────────────
+function usage() {
+  console.error(`Usage: node ${path.basename(process.argv[1])} [options] <input.mp4> [output.mp4]
+
+Options:
+  --factor N     Inflation multiplier (default: random 8-12)
+  --seed N       PRNG seed for fake payload (default: random)
+  --verbose      Extra logging
+  -h, --help     Show this help
+`);
+  process.exit(1);
+}
+
+const args = process.argv.slice(2);
+const opts = { verbose: false };
+const files = [];
+
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '-h' || a === '--help') usage();
+  else if (a === '--verbose') opts.verbose = true;
+  else if (a === '--factor') opts.factor = parseInt(args[++i], 10);
+  else if (a === '--seed')   opts.seed   = parseInt(args[++i], 10);
+  else if (a.startsWith('-')) {
+    console.error(`Unknown option: ${a}`);
+    usage();
+  } else {
+    files.push(a);
+  }
+}
+
+if (files.length < 1) usage();
+const [inputPath, outputPath] = files;
+
+if (!fs.existsSync(inputPath)) {
+  console.error(`File not found: ${inputPath}`);
+  process.exit(1);
+}
+
+const input = fs.readFileSync(inputPath);
+console.log(`[*] Read     ${inputPath}  (${(input.length / 1024 / 1024).toFixed(2)} MB)`);
+console.log(`[*] Patching …`);
+
+let patched;
+try {
+  patched = patch(input, opts);
+} catch (e) {
+  console.error(`[!] ${e.message}`);
+  process.exit(1);
+}
+
+const outPath = outputPath || inputPath.replace(/\.mp4$/i, '_patched.mp4');
+fs.writeFileSync(outPath, patched);
+console.log(`[+] Done → ${outPath}  (${(patched.length / 1024 / 1024).toFixed(2)} MB)`);
