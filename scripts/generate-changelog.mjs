@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +37,9 @@ function parseChangelog(markdown) {
 
 function main() {
     try {
-        const markdown = readFileSync(CHANGELOG_PATH, "utf-8");
+        const markdown = existsSync(CHANGELOG_PATH)
+            ? readFileSync(CHANGELOG_PATH, "utf-8")
+            : "";
         const changelogData = parseChangelog(markdown);
 
         mkdirSync(dirname(OUTPUT_PATH), { recursive: true });
