@@ -1,0 +1,1036 @@
+
+/* =========================================================
+   THEZIESS METHOD — Smooth UX/UI Pass · 2026-08-14
+   Visual + interaction overrides only. Core app logic stays intact.
+   ========================================================= */
+
+:root {
+  --ux-ease-out: cubic-bezier(.16,1,.3,1);
+  --ux-ease-soft: cubic-bezier(.4,0,.2,1);
+  --ux-fast: 160ms;
+  --ux-normal: 260ms;
+  --ux-slow: 420ms;
+  --ux-line: rgba(216,180,254,.17);
+  --ux-line-hover: rgba(103,232,249,.44);
+  --ux-card: rgba(16,7,31,.72);
+  --ux-text-soft: rgba(239,231,255,.74);
+  --ux-text-faint: rgba(216,200,233,.56);
+}
+
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  padding-top: clamp(12px,2vw,22px);
+  padding-inline: clamp(10px,2vw,18px);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+[role="button"],
+input,
+select,
+textarea,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(103,232,249,.78) !important;
+  outline-offset: 3px;
+}
+
+/* ---------- Layout + header ---------- */
+
+.page {
+  width: min(100%,1040px);
+  max-width: 1040px;
+  gap: 18px;
+}
+
+.container {
+  gap: 18px;
+}
+
+.panel {
+  border-radius: 24px;
+  box-shadow: 0 18px 55px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.035);
+}
+
+.panel-header {
+  padding: 18px 20px;
+  overflow: hidden;
+}
+
+.panel-header .header {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(270px,350px);
+  align-items: center;
+  gap: 20px;
+  text-align: left;
+}
+
+.brand-wrap {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 64px minmax(0,1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-logo {
+  width: 64px;
+  height: 64px;
+  padding: 5px;
+  border-radius: 18px;
+  transform: translateZ(0);
+}
+
+.brand-copy {
+  min-width: 0;
+  text-align: left;
+}
+
+.header-title {
+  font-size: clamp(27px,4vw,39px);
+  line-height: 1.04;
+  letter-spacing: .045em;
+}
+
+.header-subtitle {
+  max-width: 640px;
+  margin: 7px 0 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ux-text-soft);
+}
+
+.header-account-area {
+  width: 100%;
+  margin: 0;
+}
+
+.header-login-button,
+.telegram-account-card {
+  min-height: 58px;
+  border-radius: 17px;
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    border-color var(--ux-normal) var(--ux-ease-soft),
+    background var(--ux-normal) var(--ux-ease-soft),
+    box-shadow var(--ux-normal) var(--ux-ease-out);
+}
+
+.header-login-button {
+  gap: 9px;
+  font-size: 13px;
+}
+
+.header-login-button i {
+  font-size: 19px;
+}
+
+.header-login-button:hover {
+  transform: translate3d(0,-2px,0);
+}
+
+.header-login-button:active {
+  transform: scale(.99);
+}
+
+.telegram-account-card {
+  padding: 8px 10px;
+}
+
+.telegram-account-photo {
+  width: 43px;
+  height: 43px;
+}
+
+/* ---------- Main upload experience ---------- */
+
+.panel-right {
+  padding: 18px;
+}
+
+.drop-zone {
+  min-height: 300px;
+  padding: clamp(28px,5vw,52px) 22px;
+  gap: 14px;
+  border-width: 1px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(34,211,238,.075), transparent 30%),
+    radial-gradient(circle at 50% 68%, rgba(168,85,247,.09), transparent 42%),
+    rgba(9,3,20,.52);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), inset 0 0 60px rgba(139,92,246,.025);
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    border-color var(--ux-normal) var(--ux-ease-soft),
+    background var(--ux-normal) var(--ux-ease-soft),
+    box-shadow var(--ux-normal) var(--ux-ease-out);
+}
+
+.drop-zone:hover,
+.drop-zone:focus-visible,
+.drop-zone.drag-over {
+  transform: translate3d(0,-2px,0);
+  border-color: rgba(103,232,249,.58);
+  box-shadow:
+    0 14px 38px rgba(0,0,0,.22),
+    0 0 34px rgba(34,211,238,.075),
+    inset 0 0 52px rgba(139,92,246,.045);
+}
+
+.drop-zone.drag-over {
+  background:
+    radial-gradient(circle at 50% 32%, rgba(34,211,238,.17), transparent 34%),
+    rgba(12,5,27,.78);
+}
+
+.brutalist-upload-box {
+  width: 90px;
+  height: 90px;
+  border-radius: 26px;
+  font-size: 42px;
+  animation: none;
+  transform: translateZ(0);
+  box-shadow: 0 14px 36px rgba(139,92,246,.28), inset 0 1px 1px rgba(255,255,255,.38);
+  transition:
+    transform var(--ux-slow) var(--ux-ease-out),
+    box-shadow var(--ux-normal) var(--ux-ease-out),
+    filter var(--ux-normal) var(--ux-ease-soft);
+}
+
+.drop-zone:hover .brutalist-upload-box,
+.drop-zone:focus-visible .brutalist-upload-box,
+.drop-zone.drag-over .brutalist-upload-box {
+  transform: translate3d(0,-5px,0) scale(1.035);
+  box-shadow:
+    0 20px 44px rgba(139,92,246,.34),
+    0 0 25px rgba(34,211,238,.11),
+    inset 0 1px 1px rgba(255,255,255,.42);
+}
+
+.drop-zone:active .brutalist-upload-box {
+  transform: translate3d(0,-1px,0) scale(.985);
+}
+
+.upload-feature-chips {
+  margin: 6px 0 0;
+  gap: 7px;
+}
+
+.upload-feature-chips span,
+.format-pill {
+  border-color: rgba(192,132,252,.18);
+  background: rgba(255,255,255,.028);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.drop-text-primary {
+  margin-top: 4px;
+  font-size: clamp(20px,3vw,28px);
+  letter-spacing: -.015em;
+}
+
+.drop-text-secondary {
+  margin-top: 5px;
+  color: var(--ux-text-soft);
+}
+
+/* ---------- Queue ---------- */
+
+.queue-and-actions-wrapper {
+  gap: 15px;
+  padding: 17px;
+  border-radius: 20px;
+  border-color: var(--ux-line);
+  background: linear-gradient(145deg,rgba(22,9,42,.68),rgba(8,3,18,.68));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+.queue-container {
+  gap: 12px;
+}
+
+.queue-header,
+.history-header,
+.log-header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+}
+
+.queue-header::after,
+.history-header::after,
+.log-header::after {
+  bottom: -4px;
+  width: 42px;
+  opacity: .8;
+}
+
+.icon-heading > i {
+  width: 31px;
+  height: 31px;
+  border-radius: 10px;
+  font-size: 16px;
+  box-shadow: 0 7px 20px rgba(139,92,246,.16), inset 0 1px 0 rgba(255,255,255,.22);
+}
+
+.file-list {
+  gap: 9px;
+}
+
+.file-item {
+  min-width: 0;
+  padding: 11px 12px;
+  gap: 11px;
+  border-radius: 15px;
+  background: rgba(255,255,255,.025);
+  border-color: rgba(216,180,254,.13);
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    border-color var(--ux-normal) var(--ux-ease-soft),
+    background var(--ux-normal) var(--ux-ease-soft),
+    box-shadow var(--ux-normal) var(--ux-ease-out);
+  transform: translateZ(0);
+}
+
+.file-item:hover {
+  transform: translate3d(0,-1px,0);
+  border-color: rgba(192,132,252,.28);
+  background: rgba(255,255,255,.038);
+  box-shadow: 0 10px 28px rgba(0,0,0,.14);
+}
+
+.file-item.status-processing {
+  border-color: rgba(34,211,238,.28);
+  background: rgba(34,211,238,.035);
+}
+
+.file-item.status-success {
+  border-color: rgba(52,211,153,.22);
+}
+
+.file-item.status-error {
+  border-color: rgba(251,113,133,.28);
+}
+
+.file-item-body {
+  min-width: 0;
+}
+
+.file-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item-meta {
+  color: var(--ux-text-faint);
+}
+
+.file-item-progress-track {
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255,255,255,.055);
+}
+
+.file-item-progress-bar {
+  border-radius: inherit;
+  transition: width 320ms var(--ux-ease-soft);
+}
+
+.file-remove-btn,
+.file-tiktok-upload-btn,
+.history-btn,
+.history-toggle-btn,
+.btn-clear-history,
+.video-check-paste {
+  transition:
+    transform var(--ux-fast) var(--ux-ease-out),
+    border-color var(--ux-fast) var(--ux-ease-soft),
+    background var(--ux-fast) var(--ux-ease-soft),
+    color var(--ux-fast) var(--ux-ease-soft),
+    opacity var(--ux-fast) var(--ux-ease-soft);
+}
+
+.file-remove-btn:hover,
+.file-tiktok-upload-btn:hover:not(:disabled),
+.history-btn:hover,
+.history-toggle-btn:hover,
+.btn-clear-history:hover,
+.video-check-paste:hover {
+  transform: translate3d(0,-1px,0);
+}
+
+.file-remove-btn:active,
+.file-tiktok-upload-btn:active:not(:disabled),
+.history-btn:active,
+.history-toggle-btn:active,
+.btn-clear-history:active,
+.video-check-paste:active {
+  transform: scale(.96);
+}
+
+/* ---------- Actions ---------- */
+
+.control-actions {
+  gap: 10px;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 9px;
+}
+
+.btn-row .btn-clear {
+  flex: 0 0 auto;
+}
+
+.btn-row .btn-patch {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.btn,
+.btn-tiktok {
+  min-height: 56px;
+  border-radius: 16px;
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    border-color var(--ux-normal) var(--ux-ease-soft),
+    background var(--ux-normal) var(--ux-ease-soft),
+    box-shadow var(--ux-normal) var(--ux-ease-out),
+    filter var(--ux-normal) var(--ux-ease-soft),
+    opacity var(--ux-normal) var(--ux-ease-soft);
+  transform: translateZ(0);
+}
+
+.btn:hover:not(:disabled),
+.btn-tiktok:hover:not(:disabled) {
+  transform: translate3d(0,-2px,0);
+}
+
+.btn:active:not(:disabled),
+.btn-tiktok:active:not(:disabled) {
+  transform: scale(.985);
+}
+
+.btn-patch {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.btn-patch::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: linear-gradient(110deg,transparent 24%,rgba(255,255,255,.14) 48%,transparent 72%);
+  transform: translateX(-115%);
+  transition: transform 620ms var(--ux-ease-out);
+}
+
+.btn-patch:hover:not(:disabled)::after {
+  transform: translateX(115%);
+}
+
+.btn-patch:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.patch-access-hint {
+  min-height: 40px;
+  margin-top: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  color: var(--ux-text-soft);
+  line-height: 1.5;
+  transition:
+    transform var(--ux-fast) var(--ux-ease-out),
+    background var(--ux-fast) var(--ux-ease-soft),
+    border-color var(--ux-fast) var(--ux-ease-soft),
+    color var(--ux-fast) var(--ux-ease-soft);
+}
+
+.patch-access-hint:hover,
+.patch-access-hint:focus-visible {
+  transform: translate3d(0,-1px,0);
+  color: #efe7ff;
+}
+
+.upload-note {
+  padding: 12px 14px;
+  border-radius: 15px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.upload-note > i {
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  box-shadow: 0 7px 20px rgba(139,92,246,.18);
+}
+
+/* ---------- Progress ---------- */
+
+.progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255,255,255,.045);
+}
+
+.progress-bar {
+  border-radius: inherit;
+  transition: width 360ms var(--ux-ease-soft);
+  box-shadow: 0 0 16px rgba(34,211,238,.13);
+}
+
+/* ---------- Secondary screens ---------- */
+
+.panel-log,
+.panel-video-check {
+  padding: 18px;
+}
+
+.status-log {
+  max-height: 290px;
+  padding: 13px 14px;
+  border-radius: 15px;
+  line-height: 1.65;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.history-container {
+  border-radius: 20px;
+  border-color: var(--ux-line);
+  background: rgba(14,6,27,.58);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.022);
+}
+
+.history-item {
+  border-radius: 15px;
+  background: rgba(255,255,255,.024);
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    border-color var(--ux-normal) var(--ux-ease-soft),
+    background var(--ux-normal) var(--ux-ease-soft);
+}
+
+.history-item:hover {
+  transform: translate3d(0,-1px,0);
+  border-color: rgba(192,132,252,.27);
+  background: rgba(255,255,255,.037);
+}
+
+.video-check-input-row {
+  align-items: stretch;
+}
+
+.video-check-input-wrap,
+.video-check-submit,
+.video-check-paste {
+  min-height: 50px;
+  border-radius: 14px;
+}
+
+.video-check-input-wrap {
+  transition:
+    border-color var(--ux-fast) var(--ux-ease-soft),
+    box-shadow var(--ux-fast) var(--ux-ease-soft),
+    background var(--ux-fast) var(--ux-ease-soft);
+}
+
+.video-check-input-wrap:focus-within {
+  border-color: rgba(103,232,249,.44);
+  box-shadow: 0 0 0 3px rgba(34,211,238,.07);
+}
+
+.video-check-submit {
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    box-shadow var(--ux-normal) var(--ux-ease-out),
+    filter var(--ux-normal) var(--ux-ease-soft);
+}
+
+.video-check-submit:hover:not(:disabled) {
+  transform: translate3d(0,-2px,0);
+  filter: brightness(1.06);
+}
+
+.video-check-submit:active:not(:disabled) {
+  transform: scale(.985);
+}
+
+.video-check-preview {
+  border-radius: 17px;
+  border-color: var(--ux-line);
+}
+
+.video-check-metrics {
+  gap: 9px;
+}
+
+.video-check-metric {
+  border-radius: 14px;
+  border-color: var(--ux-line);
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    border-color var(--ux-normal) var(--ux-ease-soft),
+    background var(--ux-normal) var(--ux-ease-soft);
+}
+
+.video-check-metric:hover {
+  transform: translate3d(0,-1px,0);
+  border-color: rgba(192,132,252,.27);
+}
+
+/* ---------- Modal motion ---------- */
+
+.modal-overlay {
+  overscroll-behavior: contain;
+}
+
+.modal-overlay.active .modal-card,
+.modal-overlay.active .tutorial-page {
+  animation: ux-modal-in 360ms var(--ux-ease-out) both;
+}
+
+@keyframes ux-modal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0,14px,0) scale(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0,0,0) scale(1);
+  }
+}
+
+.modal-card,
+.auth-modal-card,
+.profile-modal-card,
+.payment-modal-card,
+.tiktok-upload-modal-card {
+  border-radius: 24px;
+}
+
+.modal-close-btn {
+  transition:
+    transform var(--ux-fast) var(--ux-ease-out),
+    background var(--ux-fast) var(--ux-ease-soft),
+    color var(--ux-fast) var(--ux-ease-soft),
+    border-color var(--ux-fast) var(--ux-ease-soft);
+}
+
+.modal-close-btn:hover {
+  transform: rotate(4deg) scale(1.04);
+}
+
+.modal-close-btn:active {
+  transform: scale(.94);
+}
+
+/* ---------- Bottom navigation ---------- */
+
+.app-bottom-nav {
+  width: min(calc(100% - 22px),680px);
+  min-height: 68px;
+  padding: 7px;
+  gap: 4px;
+  border-radius: 21px;
+  background: rgba(9,3,20,.84);
+  border-color: rgba(216,180,254,.20);
+  box-shadow: 0 16px 48px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.app-nav-button {
+  min-height: 54px;
+  border-radius: 15px;
+  transition:
+    transform var(--ux-normal) var(--ux-ease-out),
+    background var(--ux-normal) var(--ux-ease-soft),
+    color var(--ux-normal) var(--ux-ease-soft),
+    box-shadow var(--ux-normal) var(--ux-ease-out);
+}
+
+.app-nav-button:hover {
+  transform: translate3d(0,-1px,0);
+}
+
+.app-nav-button:active {
+  transform: scale(.96);
+}
+
+.app-nav-button.active {
+  box-shadow: 0 8px 24px rgba(139,92,246,.22), inset 0 1px 0 rgba(255,255,255,.16);
+}
+
+/* ---------- View transition ---------- */
+
+body[data-app-view="compress"] .panel-right:not([hidden]),
+body[data-app-view="history"] #historySection:not([hidden]),
+body[data-app-view="check"] .panel-video-check:not([hidden]) {
+  animation: ux-view-in 300ms var(--ux-ease-out) both;
+}
+
+@keyframes ux-view-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0,8px,0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0,0,0);
+  }
+}
+
+@media (min-width: 860px) {
+  .panel-right {
+    padding: 20px;
+  }
+
+  .video-check-metrics {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+  }
+}
+
+/* ---------- Tablet ---------- */
+
+@media (max-width: 780px) {
+  .panel-header .header {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .brand-wrap {
+    grid-template-columns: 58px minmax(0,1fr);
+  }
+
+  .brand-logo {
+    width: 58px;
+    height: 58px;
+    border-radius: 16px;
+  }
+
+  .header-login-button,
+  .telegram-account-card {
+    min-height: 54px;
+  }
+
+  .drop-zone {
+    min-height: 280px;
+  }
+}
+
+/* ---------- Phone ---------- */
+
+@media (max-width: 560px) {
+  body {
+    padding: 9px 9px 92px;
+  }
+
+  .page,
+  .container {
+    gap: 11px;
+  }
+
+  .panel {
+    padding: 13px;
+    gap: 13px;
+    border-radius: 19px;
+  }
+
+  .panel-header {
+    padding: 14px;
+  }
+
+  .panel-header .header {
+    gap: 12px;
+  }
+
+  .brand-wrap {
+    grid-template-columns: 50px minmax(0,1fr);
+    gap: 11px;
+  }
+
+  .brand-logo {
+    width: 50px;
+    height: 50px;
+    padding: 4px;
+    border-radius: 14px;
+  }
+
+  .header-title {
+    font-size: clamp(23px,7.3vw,30px);
+    letter-spacing: .025em;
+  }
+
+  .header-subtitle {
+    margin-top: 5px;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  .header-login-button,
+  .telegram-account-card {
+    min-height: 50px;
+    border-radius: 14px;
+  }
+
+  .telegram-account-photo {
+    width: 38px;
+    height: 38px;
+  }
+
+  .panel-right,
+  .panel-log,
+  .panel-video-check {
+    padding: 12px;
+  }
+
+  .drop-zone {
+    min-height: 248px;
+    padding: 28px 12px;
+    gap: 11px;
+    border-radius: 18px;
+  }
+
+  .brutalist-upload-box {
+    width: 72px;
+    height: 72px;
+    border-radius: 21px;
+    font-size: 34px;
+  }
+
+  .upload-feature-chips {
+    gap: 5px;
+    margin-top: 4px;
+  }
+
+  .upload-feature-chips span {
+    padding: 4px 7px;
+    font-size: 9px;
+  }
+
+  .drop-text-primary {
+    font-size: 19px;
+  }
+
+  .drop-text-secondary {
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+
+  .queue-and-actions-wrapper {
+    padding: 12px;
+    gap: 12px;
+    border-radius: 17px;
+  }
+
+  .queue-title,
+  .history-title,
+  .log-title {
+    font-size: 13px;
+  }
+
+  .file-item {
+    padding: 10px;
+    gap: 9px;
+  }
+
+  .btn-row {
+    flex-wrap: nowrap;
+    gap: 7px;
+  }
+
+  .btn-row .btn-clear {
+    flex-basis: 34%;
+  }
+
+  .btn,
+  .btn-tiktok {
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 12px;
+  }
+
+  .control-actions .btn-patch,
+  .control-actions .btn-tiktok {
+    grid-template-columns: 38px minmax(0,1fr) 32px;
+    min-height: 52px;
+  }
+
+  .btn-leading-icon {
+    width: 34px;
+    height: 34px;
+    font-size: 18px;
+  }
+
+  .btn-trailing-icon {
+    width: 30px;
+    height: 30px;
+    font-size: 22px;
+  }
+
+  .control-actions .btn-patch > span,
+  .control-actions .btn-tiktok > span {
+    font-size: 12px;
+  }
+
+  .patch-access-hint {
+    min-height: 38px;
+    padding: 8px 10px;
+    font-size: 10.5px;
+  }
+
+  .upload-note {
+    grid-template-columns: 34px minmax(0,1fr);
+    gap: 9px;
+    padding: 10px 11px;
+    font-size: 10.5px;
+  }
+
+  .upload-note > i {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+  }
+
+  .video-check-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .video-check-submit {
+    width: 100%;
+  }
+
+  .app-bottom-nav {
+    width: calc(100% - 12px);
+    min-height: 64px;
+    bottom: max(6px,env(safe-area-inset-bottom));
+    padding: 5px;
+    gap: 1px;
+    border-radius: 18px;
+  }
+
+  .app-nav-button {
+    min-height: 52px;
+    padding-inline: 2px;
+    border-radius: 13px;
+    font-size: 9px;
+  }
+
+  .app-nav-icon,
+  .app-nav-button > i {
+    font-size: 19px;
+  }
+
+  .modal-card,
+  .auth-modal-card,
+  .profile-modal-card,
+  .payment-modal-card,
+  .tiktok-upload-modal-card {
+    border-radius: 20px;
+  }
+}
+
+/* ---------- Very small phone ---------- */
+
+@media (max-width: 380px) {
+  .header-subtitle {
+    display: none;
+  }
+
+  .upload-feature-chips span:nth-child(3) {
+    display: none;
+  }
+
+  .btn-row {
+    flex-direction: column;
+  }
+
+  .btn-row .btn-clear,
+  .btn-row .btn-patch {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .btn-clear {
+    min-height: 44px;
+  }
+
+  .app-nav-button {
+    font-size: 8px;
+  }
+}
+
+/* Touch devices should not retain desktop hover transforms. */
+@media (hover: none) {
+  .drop-zone:hover,
+  .file-item:hover,
+  .history-item:hover,
+  .video-check-metric:hover,
+  .app-nav-button:hover,
+  .btn:hover:not(:disabled),
+  .btn-tiktok:hover:not(:disabled),
+  .header-login-button:hover {
+    transform: none;
+  }
+
+  .btn-patch::after {
+    display: none;
+  }
+}
+
+/* Accessibility + battery */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  .modal-overlay.active .modal-card,
+  .modal-overlay.active .tutorial-page,
+  body[data-app-view="compress"] .panel-right:not([hidden]),
+  body[data-app-view="history"] #historySection:not([hidden]),
+  body[data-app-view="check"] .panel-video-check:not([hidden]) {
+    animation: none !important;
+  }
+
+  .drop-zone,
+  .brutalist-upload-box,
+  .btn,
+  .btn-tiktok,
+  .app-nav-button,
+  .file-item,
+  .history-item,
+  .video-check-metric,
+  .progress-bar,
+  .file-item-progress-bar {
+    transition-duration: .01ms !important;
+  }
+}
