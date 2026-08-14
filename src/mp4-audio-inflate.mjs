@@ -90,6 +90,61 @@ function readBox(bytes, offset, end) {
     };
 }
 
+function looksLikeBoxHeader(bytes, offset, end) {
+    if (offset + 8 > end) return false;
+
+    const size32 = readU32(bytes, offset);
+    let headerSize = 8;
+    let size = size32;
+
+    if (size32 === 1) {
+        if (offset + 16 > end) return false;
+        const hi = readU32(bytes, offset + 8);
+        const lo = readU32(bytes, offset + 12);
+        size = hi * 0x100000000 + lo;
+        headerSize = 16;
+    } else if (size32 === 0) {
+        size = end - offset;
+    }
+
+    if (!Number.isSafeInteger(size) || size < headerSize || offset + size > end) {
+        return false;
+    }
+
+    // MP4 atom types are normally printable 4-byte codes. This extra check
+    // prevents version/flags bytes from being mistaken for a child header.
+    for (let i = 0; i < 4; i++) {
+        const c = bytes[offset + 4 + i];
+        if (c < 0x20 || c > 0x7e) return false;
+    }
+
+    return true;
+}
+
+function metaChildStart(bytes, box) {
+    // ISO BMFF meta is a FullBox and starts with 4 bytes version/flags.
+    // QuickTime-style meta starts directly with its first child atom.
+    // Detect both instead of always skipping 4 bytes.
+    const direct = box.contentStart;
+    const afterFullBoxHeader = box.contentStart + 4;
+
+    const directLooksValid = looksLikeBoxHeader(bytes, direct, box.end);
+    const skippedLooksValid = looksLikeBoxHeader(bytes, afterFullBoxHeader, box.end);
+
+    if (directLooksValid && !skippedLooksValid) return direct;
+    if (skippedLooksValid && !directLooksValid) return afterFullBoxHeader;
+
+    // If both happen to look plausible, prefer ISO FullBox when its
+    // version/flags field is a normal small value (usually all zeroes).
+    if (skippedLooksValid && afterFullBoxHeader <= box.end) {
+        const version = bytes[direct];
+        const flags = (bytes[direct + 1] << 16) | (bytes[direct + 2] << 8) | bytes[direct + 3];
+        if (version <= 1 && flags <= 0x00ffffff) return afterFullBoxHeader;
+    }
+
+    return direct;
+}
+
 function parseBoxes(bytes, start = 0, end = bytes.byteLength) {
     const boxes = [];
     let offset = start;
@@ -97,7 +152,7 @@ function parseBoxes(bytes, start = 0, end = bytes.byteLength) {
     while (offset + 8 <= end) {
         const box = readBox(bytes, offset, end);
         if (CONTAINERS.has(box.type)) {
-            const childStart = box.type === "meta" ? box.contentStart + 4 : box.contentStart;
+            const childStart = box.type === "meta" ? metaChildStart(bytes, box) : box.contentStart;
             box.prefixStart = box.contentStart;
             box.prefixEnd = childStart;
             box.children = parseBoxes(bytes, childStart, box.end);

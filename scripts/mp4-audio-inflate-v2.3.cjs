@@ -41,6 +41,51 @@ function readBox(buf, o, end) {
   };
 }
 
+function looksLikeBoxHeader(buf, offset, end) {
+  if (offset + 8 > end) return false;
+
+  let size = buf.readUInt32BE(offset);
+  let hs = 8;
+
+  if (size === 1) {
+    if (offset + 16 > end) return false;
+    const hi = buf.readUInt32BE(offset + 8);
+    const lo = buf.readUInt32BE(offset + 12);
+    size = hi * 0x100000000 + lo;
+    hs = 16;
+  } else if (size === 0) {
+    size = end - offset;
+  }
+
+  if (!Number.isSafeInteger(size) || size < hs || offset + size > end) return false;
+
+  for (let i = 0; i < 4; i++) {
+    const c = buf[offset + 4 + i];
+    if (c < 0x20 || c > 0x7e) return false;
+  }
+
+  return true;
+}
+
+function metaChildStart(buf, box) {
+  const direct = box.cStart;
+  const afterFullBoxHeader = box.cStart + 4;
+
+  const directLooksValid = looksLikeBoxHeader(buf, direct, box.end);
+  const skippedLooksValid = looksLikeBoxHeader(buf, afterFullBoxHeader, box.end);
+
+  if (directLooksValid && !skippedLooksValid) return direct;
+  if (skippedLooksValid && !directLooksValid) return afterFullBoxHeader;
+
+  if (skippedLooksValid && afterFullBoxHeader <= box.end) {
+    const version = buf[direct];
+    const flags = (buf[direct + 1] << 16) | (buf[direct + 2] << 8) | buf[direct + 3];
+    if (version <= 1 && flags <= 0x00ffffff) return afterFullBoxHeader;
+  }
+
+  return direct;
+}
+
 function parseBoxes(buf, start = 0, end = null) {
   if (end === null) end = buf.length;
   const boxes = [];
@@ -48,7 +93,7 @@ function parseBoxes(buf, start = 0, end = null) {
   while (o + 8 <= end) {
     const box = readBox(buf, o, end);
     if (CONTAINERS.has(box.type)) {
-      const cs = box.type === 'meta' ? box.cStart + 4 : box.cStart;
+      const cs = box.type === 'meta' ? metaChildStart(buf, box) : box.cStart;
       box.pStart = box.cStart;
       box.pEnd   = cs;
       box.children = parseBoxes(buf, cs, box.end);
