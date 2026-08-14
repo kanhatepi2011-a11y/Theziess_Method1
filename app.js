@@ -2642,12 +2642,12 @@ async function patchSingleFile(item) {
     // The only processing step: run the audio-inflation MP4 patcher.
     // No FFmpeg, frame interpolation, resizing, transcoding, normalization,
     // bitrate conversion, FPS validation, or other compression pipeline.
-    logMessage("  Applying audio-inflation patch v2.3 (original duration preserved)...", "info");
+    logMessage("  Applying audio-inflation patch only...", "info");
     const patchResult = await patchAudioInflationInWorker(inputBuffer);
     if (isCancelled) throw new Error("Cancelled");
 
     logMessage(
-        `  Audio inflation v${patchResult.version || "2.3"} complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} added samples).`,
+        `  Audio inflation complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} added samples).`,
         "success",
     );
 

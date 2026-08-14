@@ -1,9 +1,3 @@
-// Audio-inflation MP4 patcher — v2.3 (browser/Web Worker port)
-// Core v2.3 behavior: inflate audio sample tables while leaving mdhd/mvhd
-// duration fields unchanged so the output keeps the original movie duration.
-// Browser compatibility from the existing site is preserved (Uint8Array, co64,
-// padding/vendor-byte recovery, and transferable ArrayBuffer output).
-
 // Parse only the ISO-BMFF containers required by the patcher. Metadata boxes
 // such as udta/meta/ilst may contain vendor-specific payloads that are not a
 // regular sequence of child boxes and must remain opaque.
@@ -234,21 +228,31 @@ function buildStss(realCount, fps) {
     return makeBox("stss", payload);
 }
 
+function patchMdhdDuration(originalBoxBytes, mdhdBox, sourceBytes, extraDuration) {
+    const out = originalBoxBytes.slice();
+    const version = sourceBytes[mdhdBox.contentStart];
+    if (version === 1) {
+        const durationOffset = mdhdBox.contentStart + 24;
+        const view = new DataView(sourceBytes.buffer, sourceBytes.byteOffset, sourceBytes.byteLength);
+        const current = view.getBigUint64(durationOffset, false);
+        const next = current + BigInt(extraDuration);
+        new DataView(out.buffer).setBigUint64(durationOffset - mdhdBox.offset, next, false);
+    } else {
+        const durationOffset = mdhdBox.contentStart + 16;
+        const current = readU32(sourceBytes, durationOffset);
+        writeU32(out, durationOffset - mdhdBox.offset, Math.min(0xffffffff, current + extraDuration));
+    }
+    return out;
+}
+
 export function patchAudioInflationMp4(input, options = {}) {
     const inputBytes = input instanceof Uint8Array ? input : new Uint8Array(input);
-    // v2.3 CLI names are factor/baseSize/seed. Keep multiplier/baseAudioSize
-    // aliases so the existing site API remains backwards-compatible.
-    const requestedFactor = Number.isFinite(options.factor) ? options.factor : options.multiplier;
-    const multiplier = Number.isFinite(requestedFactor)
-        ? Math.max(2, Math.min(20, Math.floor(requestedFactor)))
+    const multiplier = Number.isFinite(options.multiplier)
+        ? Math.max(2, Math.min(20, Math.floor(options.multiplier)))
         : ri(8, 12);
-    const requestedBaseSize = Number.isFinite(options.baseSize) ? options.baseSize : options.baseAudioSize;
-    const baseAudioSize = Number.isFinite(requestedBaseSize)
-        ? Math.max(16, Math.min(4096, Math.floor(requestedBaseSize)))
+    const baseAudioSize = Number.isFinite(options.baseAudioSize)
+        ? Math.max(16, Math.min(4096, Math.floor(options.baseAudioSize)))
         : ri(60, 100);
-    const payloadSeed = Number.isFinite(options.seed)
-        ? Math.max(0, Math.min(255, Math.floor(options.seed)))
-        : ri(0, 255);
 
     const boxes = parseBoxes(inputBytes);
     const ftyp = boxes.find((box) => box.type === "ftyp");
@@ -300,7 +304,7 @@ export function patchAudioInflationMp4(input, options = {}) {
 
     const fakeAudioSizes = Array.from({ length: fakeAudioCount }, () => baseAudioSize + ri(0, 60));
     const fakeAudioChunks = [];
-    const seed = payloadSeed;
+    const seed = ri(0, 255);
     for (let i = 0; i < fakeAudioSizes.length; i++) {
         const chunk = new Uint8Array(fakeAudioSizes[i]);
         for (let j = 0; j < chunk.length; j++) {
@@ -337,38 +341,33 @@ export function patchAudioInflationMp4(input, options = {}) {
         [audioStsc, makeBox("stsc", audioStscPayload)],
     ]);
 
-    // v2.3: extend the audio stts sample count, but deliberately DO NOT
-    // modify mdhd, tkhd, or mvhd duration fields. This preserves the movie's
-    // original declared duration while keeping the inflated sample table.
-    let audioDelta = 0;
-    if (audioStts) {
+    if (audioStts && audioMdhd) {
         const entryCount = readU32(inputBytes, audioStts.contentStart + 4);
-        if (entryCount > 0) {
-            audioDelta = readU32(
-                inputBytes,
-                audioStts.contentStart + 12 + (entryCount - 1) * 8,
+        const lastDelta = entryCount > 0
+            ? readU32(inputBytes, audioStts.contentStart + 12 + (entryCount - 1) * 8)
+            : 0;
+        if (lastDelta > 0) {
+            const payload = new Uint8Array(8 + (entryCount + 1) * 8);
+            payload.set(inputBytes.slice(audioStts.contentStart, audioStts.contentStart + 4), 0);
+            writeU32(payload, 4, entryCount + 1);
+            payload.set(
+                inputBytes.slice(audioStts.contentStart + 8, audioStts.contentStart + 8 + entryCount * 8),
+                8,
+            );
+            writeU32(payload, 8 + entryCount * 8, fakeAudioCount);
+            writeU32(payload, 12 + entryCount * 8, lastDelta);
+            fixed.set(audioStts, makeBox("stts", payload));
+            fixed.set(
+                audioMdhd,
+                patchMdhdDuration(
+                    inputBytes.slice(audioMdhd.offset, audioMdhd.end),
+                    audioMdhd,
+                    inputBytes,
+                    fakeAudioCount * lastDelta,
+                ),
             );
         }
     }
-    if (audioDelta <= 0 && audioMdhd) {
-        const audioTimescale = readU32(inputBytes, audioMdhd.contentStart + 12);
-        audioDelta = Math.max(1, Math.round(audioTimescale / 43));
-    }
-
-    if (audioStts && fakeAudioCount > 0 && audioDelta > 0) {
-        const entryCount = readU32(inputBytes, audioStts.contentStart + 4);
-        const payload = new Uint8Array(8 + (entryCount + 1) * 8);
-        payload.set(inputBytes.slice(audioStts.contentStart, audioStts.contentStart + 4), 0);
-        writeU32(payload, 4, entryCount + 1);
-        payload.set(
-            inputBytes.slice(audioStts.contentStart + 8, audioStts.contentStart + 8 + entryCount * 8),
-            8,
-        );
-        writeU32(payload, 8 + entryCount * 8, fakeAudioCount);
-        writeU32(payload, 12 + entryCount * 8, audioDelta);
-        fixed.set(audioStts, makeBox("stts", payload));
-    }
-
 
     const allChunkOffsetBoxes = [];
     for (const track of moov.children) {
@@ -414,10 +413,9 @@ export function patchAudioInflationMp4(input, options = {}) {
             if (child.offset > rawCursor) {
                 parts.push(inputBytes.slice(rawCursor, child.offset));
             }
-            // v2.3 duration-preservation fix: keep the original audio edit list.
-            // AAC MP4s commonly use edts/elst to hide encoder priming; removing
-            // it can make the visible duration longer by one AAC frame.
-            parts.push(rebuild(child, replacements));
+            if (!(box === audioTrack && child.type === "edts")) {
+                parts.push(rebuild(child, replacements));
+            }
             rawCursor = child.end;
         }
         if (rawCursor < box.end) {
@@ -471,10 +469,6 @@ export function patchAudioInflationMp4(input, options = {}) {
         newBuffer: output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength),
         newBytes: output,
         multiplier,
-        factor: multiplier,
-        baseSize: baseAudioSize,
-        seed,
         fakeAudioCount,
-        version: "2.3",
     };
 }
