@@ -1,16 +1,19 @@
 // Audio-inflation MP4 patcher — v2.3
 // Browser/Web Worker port of the user's Node.js script.
-// Patch behavior is intentionally kept the same as the supplied script:
+// Stable browser/Web Worker port of the supplied v2.3 script:
 // - Duration fields mdhd/mvhd are not changed.
 // - stsz/stsc/stco/stts are inflated.
-// - co64 is not supported.
-// - audio edts is stripped during rebuild.
+// - co64 remains unsupported (clear error instead of corrupt output).
+// - audio edts is preserved so player-visible duration stays original.
+// - trailing/vendor bytes are tolerated and preserved.
 
 const ri = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 
+// Parse only the structural ISO-BMFF containers needed by the patcher.
+// Vendor metadata (udta/meta/ilst) stays opaque because many phone encoders
+// put padding/proprietary payloads there that are not normal child boxes.
 const CONTAINERS = new Set([
-  'moov', 'trak', 'mdia', 'minf', 'stbl', 'edts',
-  'dinf', 'udta', 'meta', 'ilst', 'moof', 'traf'
+  'moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'dinf'
 ]);
 
 function view(bytes) {
@@ -68,23 +71,46 @@ function readBox(bytes, o, end) {
   };
 }
 
+function tryReadBox(bytes, o, end) {
+  if (o + 8 > end) return null;
+  try {
+    const box = readBox(bytes, o, end);
+    // FourCC values are normally printable ASCII. Random binary/padding must
+    // not be interpreted as a child box header.
+    if (!/^[\x20-\x7e]{4}$/.test(box.type)) return null;
+    return box;
+  } catch {
+    return null;
+  }
+}
+
 function parseBoxes(bytes, start = 0, end = null) {
   if (end === null) end = bytes.byteLength;
   const boxes = [];
   let o = start;
 
   while (o + 8 <= end) {
-    const box = readBox(bytes, o, end);
+    const box = tryReadBox(bytes, o, end);
+
+    // A number of Android/camera encoders leave vendor bytes or alignment
+    // padding after the last valid box. Treat that remainder as opaque data
+    // instead of failing with "Bad box size".
+    if (!box) break;
+
     if (CONTAINERS.has(box.type)) {
-      const cs = box.type === 'meta' ? box.cStart + 4 : box.cStart;
       box.pStart = box.cStart;
-      box.pEnd = cs;
-      box.children = parseBoxes(bytes, cs, box.end);
+      box.pEnd = box.cStart;
+      box.children = parseBoxes(bytes, box.cStart, box.end);
     }
+
     boxes.push(box);
     o = box.end;
   }
 
+  // Keep the point where valid parsing stopped so top-level raw bytes can be
+  // copied back to the output unchanged.
+  boxes.parsedEnd = o;
+  boxes.rangeEnd = end;
   return boxes;
 }
 
@@ -126,6 +152,7 @@ function parseStsz(box, bytes) {
   const defSz = readU32(bytes, box.cStart + 4);
   const count = readU32(bytes, box.cStart + 8);
   if (defSz !== 0) return Array(count).fill(defSz);
+  if (box.cStart + 12 + count * 4 > box.end) throw new Error('Invalid stsz table');
   const out = new Array(count);
   for (let i = 0; i < count; i++) {
     out[i] = readU32(bytes, box.cStart + 12 + i * 4);
@@ -135,6 +162,7 @@ function parseStsz(box, bytes) {
 
 function parseStco(box, bytes) {
   const count = readU32(bytes, box.cStart + 4);
+  if (box.cStart + 8 + count * 4 > box.end) throw new Error('Invalid stco table');
   const out = new Array(count);
   for (let i = 0; i < count; i++) {
     out[i] = readU32(bytes, box.cStart + 8 + i * 4);
@@ -144,6 +172,7 @@ function parseStco(box, bytes) {
 
 function parseStsc(box, bytes) {
   const count = readU32(bytes, box.cStart + 4);
+  if (box.cStart + 8 + count * 12 > box.end) throw new Error('Invalid stsc table');
   const out = new Array(count);
   for (let i = 0; i < count; i++) {
     const o = box.cStart + 8 + i * 12;
@@ -157,7 +186,7 @@ function parseStsc(box, bytes) {
 }
 
 function buildCtts(realCount, frameDur) {
-  const numGroups = ri(6, 10);
+  const numGroups = Math.max(1, Math.min(realCount, ri(6, 10)));
   const perGroup = Math.floor(realCount / numGroups);
   const entries = [];
   let rem = realCount;
@@ -191,9 +220,12 @@ function buildStss(realCount, fps) {
 export function patchAudioInflationMp4(input, opts = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
 
-  const factor = opts.factor ?? ri(8, 12);
-  const baseSize = opts.baseSize ?? ri(60, 100);
-  const seed = opts.seed ?? ri(0, 255);
+  const rawFactor = Number(opts.factor);
+  const rawBaseSize = Number(opts.baseSize);
+  const rawSeed = Number(opts.seed);
+  const factor = Number.isFinite(rawFactor) ? Math.max(2, Math.min(20, Math.floor(rawFactor))) : ri(8, 12);
+  const baseSize = Number.isFinite(rawBaseSize) ? Math.max(16, Math.min(4096, Math.floor(rawBaseSize))) : ri(60, 100);
+  const seed = Number.isFinite(rawSeed) ? Math.max(0, Math.min(255, Math.floor(rawSeed))) : ri(0, 255);
   const verbose = !!opts.verbose;
 
   const boxes = parseBoxes(bytes);
@@ -354,10 +386,19 @@ export function patchAudioInflationMp4(input, opts = {}) {
     writeU32(p, 0, 0);
     writeU32(p, 4, total);
 
-    orig.forEach((off, i) => writeU32(p, 8 + i * 4, off + delta));
+    orig.forEach((off, i) => {
+      const next = off + delta;
+      if (!Number.isSafeInteger(next) || next < 0 || next > 0xffffffff) {
+        throw new Error('stco offset overflow — remux first');
+      }
+      writeU32(p, 8 + i * 4, next);
+    });
 
     if (isAudio && fakeOffsets) {
       fakeOffsets.forEach((off, i) => {
+        if (!Number.isSafeInteger(off) || off < 0 || off > 0xffffffff) {
+          throw new Error('stco offset overflow — remux first');
+        }
         writeU32(p, 8 + (orig.length + i) * 4, off);
       });
     }
@@ -382,9 +423,22 @@ export function patchAudioInflationMp4(input, opts = {}) {
     }
 
     const parts = [bytes.slice(box.pStart, box.pEnd)];
+    let rawCursor = box.pEnd;
+
     for (const c of box.children) {
-      if (box === aTrak && c.type === 'edts') continue;
+      if (c.offset > rawCursor) {
+        parts.push(bytes.slice(rawCursor, c.offset));
+      }
+
+      // Keep the original audio edts/elst. AAC files commonly use it to hide
+      // encoder priming; removing it can make players report a longer duration.
       parts.push(rebuild(c, rep));
+      rawCursor = c.end;
+    }
+
+    // Preserve any unparsed padding/vendor bytes at the end of the container.
+    if (rawCursor < box.end) {
+      parts.push(bytes.slice(rawCursor, box.end));
     }
 
     if (box === vStbl) {
@@ -406,6 +460,9 @@ export function patchAudioInflationMp4(input, opts = {}) {
     .filter(b => !['ftyp', 'moov', 'mdat'].includes(b.type))
     .map(b => bytes.slice(b.offset, b.end));
   const otherTop = cat(otherTopParts);
+  const topLevelTail = boxes.parsedEnd < bytes.byteLength
+    ? bytes.slice(boxes.parsedEnd, bytes.byteLength)
+    : new Uint8Array(0);
 
   const oMdatPayload = bytes.slice(mdat.cStart, mdat.end);
   const nStart = ftyp.size + moov1.byteLength + otherTop.byteLength + 8;
@@ -428,7 +485,8 @@ export function patchAudioInflationMp4(input, opts = {}) {
     bytes.slice(ftyp.offset, ftyp.end),
     rebuild(moov, repFinal),
     ...otherTopParts,
-    makeBox('mdat', cat([oMdatPayload, fakeAPayload]))
+    makeBox('mdat', cat([oMdatPayload, fakeAPayload])),
+    topLevelTail
   ]);
 
   return {
@@ -439,6 +497,7 @@ export function patchAudioInflationMp4(input, opts = {}) {
     baseSize,
     seed,
     fakeAudioCount: fakeACount,
-    version: '2.3'
+    version: '2.3',
+    parser: 'safe-v3'
   };
 }
