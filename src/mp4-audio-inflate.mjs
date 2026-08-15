@@ -11,9 +11,13 @@
 
 const ri = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 
+// Only descend into the structural containers required by this patcher.
+// Camera apps frequently store vendor/private metadata inside udta/meta/ilst.
+// Treating those payloads as generic child-box streams can throw `Bad box size`
+// even though the actual video is perfectly playable. Keep optional metadata
+// containers opaque so their bytes are preserved exactly.
 const CONTAINERS = new Set([
-  'moov', 'trak', 'mdia', 'minf', 'stbl', 'edts',
-  'dinf', 'udta', 'meta', 'ilst', 'moof', 'traf'
+  'moov', 'trak', 'mdia', 'minf', 'stbl'
 ]);
 
 function dv(bytes) {
@@ -72,9 +76,14 @@ function readBox(bytes, o, end) {
   let hs = 8;
 
   if (size === 1) {
+    if (o + 16 > end) throw new Error(`Truncated extended box header @${o}`);
     const hi = readU32(bytes, o + 8);
     const lo = readU32(bytes, o + 12);
-    size = hi * 0x100000000 + lo;
+    const largeSize = BigInt(hi) * 0x100000000n + BigInt(lo);
+    if (largeSize > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`MP4 box '${type}' is too large for browser processing`);
+    }
+    size = Number(largeSize);
     hs = 16;
   } else if (size === 0) {
     size = end - o;
@@ -105,10 +114,9 @@ function parseBoxes(bytes, start = 0, end = null) {
   while (o + 8 <= end) {
     const box = readBox(bytes, o, end);
     if (CONTAINERS.has(box.type)) {
-      const cs = box.type === 'meta' ? box.cStart + 4 : box.cStart;
       box.pStart = box.cStart;
-      box.pEnd = cs;
-      box.children = parseBoxes(bytes, cs, box.end);
+      box.pEnd = box.cStart;
+      box.children = parseBoxes(bytes, box.cStart, box.end);
     }
     boxes.push(box);
     o = box.end;
@@ -549,7 +557,7 @@ export function patchAudioInflationMp4(input, opts = {}) {
     seed,
     fakeAudioCount: fakeACount,
     version: '2.3',
-    parser: 'local-v2.3-co64',
+    parser: 'local-v2.3-co64-camera-safe',
     co64: {
       inputTables: allChunkOffsetBoxes.filter((box) => box.type === 'co64').length,
       outputTables: forceCo64.size,
