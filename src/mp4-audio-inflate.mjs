@@ -1,11 +1,13 @@
 // Audio-inflation MP4 patcher — v2.3
-// Browser/Web Worker port of the user's Node.js script.
-// Stable browser/Web Worker port of the supplied v2.3 script:
-// - Duration fields mdhd/mvhd are not changed.
-// - stsz/stsc/stco/stts are inflated.
+// Browser/Web Worker port of the newly supplied Node.js v2.3 script.
+// Core behavior matches the supplied script:
+// - Output movie/media duration fields (mdhd/mvhd) are NOT changed.
+// - Audio sample tables stsz/stsc/stco(or co64)/stts are inflated.
+// - Audio edts is preserved as an existing website compatibility fix so visible duration stays original.
+// - Missing video ctts/stss tables are synthesized exactly as in v2.3.
+// Existing website compatibility improvements are retained:
 // - stco and co64 (64-bit chunk offsets) are both supported.
 // - stco is automatically promoted to co64 if rebuilt offsets exceed 32-bit.
-// - audio edts is preserved so player-visible duration stays original.
 // - trailing/vendor bytes are tolerated and preserved.
 
 const ri = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
@@ -455,8 +457,9 @@ export function patchAudioInflationMp4(input, opts = {}) {
         parts.push(bytes.slice(rawCursor, c.offset));
       }
 
-      // Keep the original audio edts/elst. AAC files commonly use it to hide
-      // encoder priming; removing it can make players report a longer duration.
+      // Existing website compatibility fix retained: keep audio edts/elst.
+      // AAC files commonly use it to hide encoder priming; preserving it keeps
+      // player-visible duration aligned with the original file.
       parts.push(rebuild(c, rep));
       rawCursor = c.end;
     }
@@ -565,7 +568,7 @@ export function patchAudioInflationMp4(input, opts = {}) {
     seed,
     fakeAudioCount: fakeACount,
     version: '2.3',
-    parser: 'safe-v4-co64',
+    parser: 'supplied-v2.3-web-safe-co64',
     co64: {
       inputTables: allChunkOffsetBoxes.filter((box) => box.type === 'co64').length,
       outputTables: forceCo64.size
