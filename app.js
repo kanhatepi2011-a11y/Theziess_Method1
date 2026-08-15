@@ -2646,8 +2646,11 @@ async function patchSingleFile(item) {
     const patchResult = await patchAudioInflationInWorker(inputBuffer);
     if (isCancelled) throw new Error("Cancelled");
 
+    const co64Info = patchResult.co64?.inputTables
+        ? `, co64 ${patchResult.co64.inputTables} table(s) supported`
+        : "";
     logMessage(
-        `  Audio inflation v${patchResult.version || "2.3"} complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} added samples).`,
+        `  Audio inflation v${patchResult.version || "2.3"} complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} added samples${co64Info}).`,
         "success",
     );
 

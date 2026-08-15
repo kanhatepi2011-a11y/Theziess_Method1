@@ -15,6 +15,8 @@ self.onmessage = ({ data }) => {
                 seed: result.seed,
                 version: result.version,
                 fakeAudioCount: result.fakeAudioCount,
+                co64: result.co64,
+                parser: result.parser,
             },
             [result.newBuffer],
         );
