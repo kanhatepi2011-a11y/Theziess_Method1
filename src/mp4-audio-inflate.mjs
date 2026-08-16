@@ -161,6 +161,52 @@ function cat(parts) {
   return out;
 }
 
+// Add a standard QuickTime/iTunes-style Artist metadata tag without parsing or
+// replacing any existing udta/meta/ilst payload. Existing camera/vendor metadata
+// stays byte-for-byte untouched; this is appended as a separate udta box.
+const THEZIESS_METADATA_TEXT = 'TheziessMethod.site';
+
+function makeUtf8DataBox(text) {
+  const encoded = new TextEncoder().encode(text);
+  const payload = new Uint8Array(8 + encoded.byteLength);
+  writeU32(payload, 0, 1); // UTF-8 data type
+  writeU32(payload, 4, 0); // locale
+  payload.set(encoded, 8);
+  return makeBox('data', payload);
+}
+
+function makeArtistMetadataUdta(text) {
+  const artist = makeBox('©ART', makeUtf8DataBox(text));
+  const ilst = makeBox('ilst', artist);
+
+  const handlerName = new TextEncoder().encode('Metadata Handler\0');
+  const hdlrPayload = new Uint8Array(24 + handlerName.byteLength);
+  writeU32(hdlrPayload, 0, 0); // version + flags
+  writeU32(hdlrPayload, 4, 0); // pre_defined
+  writeType(hdlrPayload, 8, 'mdir');
+  // bytes 12..23 are reserved and already zero-filled.
+  hdlrPayload.set(handlerName, 24);
+  const hdlr = makeBox('hdlr', hdlrPayload);
+
+  const metaPayload = cat([new Uint8Array(4), hdlr, ilst]);
+  const meta = makeBox('meta', metaPayload);
+  return makeBox('udta', meta);
+}
+
+function containsAsciiText(bytes, text) {
+  const needle = new TextEncoder().encode(text);
+  if (needle.byteLength === 0 || needle.byteLength > bytes.byteLength) return false;
+
+  outer:
+  for (let i = 0; i <= bytes.byteLength - needle.byteLength; i++) {
+    for (let j = 0; j < needle.byteLength; j++) {
+      if (bytes[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
 function parseStsz(box, bytes) {
   const defSz = readU32(bytes, box.cStart + 4);
   const count = readU32(bytes, box.cStart + 8);
@@ -330,6 +376,20 @@ export function patchAudioInflationMp4(input, opts = {}) {
   const fakeAPayload = cat(fakeAChunks);
   const fixed = new Map();
 
+  // Keep all original metadata untouched. If the brand is not already present
+  // anywhere in the file, append a separate standard Artist metadata udta box.
+  const brandMetadataUdta = containsAsciiText(bytes, THEZIESS_METADATA_TEXT)
+    ? null
+    : makeArtistMetadataUdta(THEZIESS_METADATA_TEXT);
+
+  if (verbose) {
+    console.log(
+      brandMetadataUdta
+        ? `[*] Adding Artist metadata: ${THEZIESS_METADATA_TEXT}`
+        : `[*] Artist metadata already contains: ${THEZIESS_METADATA_TEXT}`,
+    );
+  }
+
   // stsz
   {
     const all = [...realASizes, ...fakeASizes];
@@ -464,6 +524,11 @@ export function patchAudioInflationMp4(input, opts = {}) {
     if (box === vStbl) {
       if (newCtts) parts.push(newCtts);
       if (newStss) parts.push(newStss);
+    }
+
+    // Append only; do not alter/remove/parse existing udta/meta/ilst metadata.
+    if (box === moov && brandMetadataUdta) {
+      parts.push(brandMetadataUdta);
     }
 
     return makeBox(box.type, cat(parts));
