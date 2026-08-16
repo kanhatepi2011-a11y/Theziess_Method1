@@ -1,4 +1,5 @@
 import activityCompression from "../server/routes/activity/compression.js";
+import compressionQuota from "../server/routes/compression/quota.js";
 import authLogout from "../server/routes/auth/logout.js";
 import authMe from "../server/routes/auth/me.js";
 import authTelegram from "../server/routes/auth/telegram.js";
@@ -19,6 +20,7 @@ import tiktokUploadStatus from "../server/routes/tiktok/upload/status.js";
 
 const ROUTES = new Map([
   ["activity/compression", activityCompression],
+  ["compression/quota", compressionQuota],
   ["auth/logout", authLogout],
   ["auth/me", authMe],
   ["auth/telegram", authTelegram],

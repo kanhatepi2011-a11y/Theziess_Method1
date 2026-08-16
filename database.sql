@@ -71,6 +71,20 @@ CREATE TABLE IF NOT EXISTS theziess_compression_events_v1 (
 CREATE INDEX IF NOT EXISTS theziess_compression_events_v1_user_created_idx
   ON theziess_compression_events_v1(user_key, created_at DESC);
 
+-- Server-enforced FREE plan quota. One row per user per Cambodia calendar day.
+CREATE TABLE IF NOT EXISTS theziess_daily_compression_usage_v1 (
+  id BIGSERIAL PRIMARY KEY,
+  user_key TEXT NOT NULL,
+  usage_date DATE NOT NULL,
+  usage_count INTEGER NOT NULL DEFAULT 0 CHECK (usage_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_key, usage_date)
+);
+
+CREATE INDEX IF NOT EXISTS theziess_daily_compression_usage_v1_user_date_idx
+  ON theziess_daily_compression_usage_v1(user_key, usage_date DESC);
+
 -- TikTok OAuth connections. Tokens are encrypted in application code with
 -- AES-256-GCM before they are written to these TEXT columns.
 CREATE TABLE IF NOT EXISTS theziess_tiktok_connections_v1 (

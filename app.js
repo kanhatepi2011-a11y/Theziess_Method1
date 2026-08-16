@@ -164,6 +164,79 @@ async function reportCompressionActivity({
     }
 }
 
+function isFreeCompressionQuotaExhausted() {
+    return Boolean(
+        !LOCAL_STANDALONE_MODE &&
+        currentSubscription?.planId === "free" &&
+        currentCompressionQuota?.planId === "free" &&
+        Number(currentCompressionQuota.remaining) <= 0,
+    );
+}
+
+async function readCompressionQuota({ quiet = false } = {}) {
+    if (LOCAL_STANDALONE_MODE || !currentUser || !hasActiveSubscription()) {
+        currentCompressionQuota = null;
+        return null;
+    }
+
+    try {
+        const response = await fetch(`/api/compression/quota?t=${Date.now()}`, {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.ok) {
+            const error = new Error(data.error || "Unable to read compression quota.");
+            error.code = data.code || "COMPRESSION_QUOTA_FAILED";
+            throw error;
+        }
+
+        currentCompressionQuota = data.quota || null;
+        updateAccessUI();
+        return currentCompressionQuota;
+    } catch (error) {
+        currentCompressionQuota = null;
+        if (!quiet) console.warn("Unable to load compression quota", error);
+        updateAccessUI();
+        return null;
+    }
+}
+
+async function reserveCompressionUse() {
+    if (LOCAL_STANDALONE_MODE) {
+        return { unlimited: true, planId: "local" };
+    }
+
+    const response = await fetch("/api/compression/quota", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+        },
+        body: "{}",
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (data.quota) {
+        currentCompressionQuota = data.quota;
+        updateAccessUI();
+    }
+
+    if (!response.ok || !data.ok) {
+        const error = new Error(data.error || "Compression is not available right now.");
+        error.code = data.code || "COMPRESSION_QUOTA_FAILED";
+        error.quota = data.quota || null;
+        throw error;
+    }
+
+    return data.quota;
+}
+
 
 const supportedMimeTypes = [
     "video/mp4",
@@ -204,6 +277,7 @@ let lastPatchedRes = "1080";
 
 let currentUser = null;
 let currentSubscription = null;
+let currentCompressionQuota = null;
 let currentTikTokAccount = null;
 let pendingPlan = null;
 let pendingTikTokUpload = null;
@@ -350,11 +424,15 @@ function updateTelegramProfileUI(loggedIn, active) {
             "profilePlanExpiry",
             new Date(currentSubscription.expiresAt).toLocaleDateString(),
         );
+        const freeQuotaText =
+            isFreeTrial && currentCompressionQuota?.planId === "free"
+                ? ` Today: ${currentCompressionQuota.used}/${currentCompressionQuota.limit} compression(s) used; resets at midnight Cambodia time.`
+                : "";
         setElementText(
             "profilePlanDescription",
             isFreeTrial
-                ? "Your one-time 3-day free trial is active."
-                : `${plan.name} is active. Payment method: ${currentSubscription.paymentMethod || "KHQR"}.`,
+                ? `Your one-time 3-day free trial is active.${freeQuotaText}`
+                : `${plan.name} is active with unlimited compression/patching. Payment method: ${currentSubscription.paymentMethod || "KHQR"}.`,
         );
         profilePlanBadge?.classList.toggle("premium", !isFreeTrial);
         profilePlanBadge?.classList.toggle("trial", isFreeTrial);
@@ -433,7 +511,7 @@ function configurePlanActivationModal(plan) {
     if (paymentNotice) {
         paymentNotice.classList.remove("error");
         paymentNotice.textContent = isFreeTrial
-            ? "This free trial can be activated once per Telegram account. The 3-day period starts immediately after confirmation."
+            ? "This free trial can be activated once per Telegram account. It includes 3 video patches per day, resetting at midnight Cambodia time. The 3-day period starts immediately after confirmation."
             : `${plan?.name || "This paid plan"} cannot be claimed for free. Only an administrator can assign it through the Telegram bot. Your Telegram ID is ${currentUser?.id || "unknown"}.`;
     }
     if (confirmButton) {
@@ -611,6 +689,7 @@ async function loadServerSession({ retries = 2, preserveExistingSubscription = f
                         : null);
                 storeTelegramUser(data.user);
                 updateAccessUI();
+                await readCompressionQuota({ quiet: true });
                 return true;
             }
 
@@ -620,6 +699,7 @@ async function loadServerSession({ retries = 2, preserveExistingSubscription = f
                 preserveExistingSubscription && hasActiveSubscription()
                     ? currentSubscription
                     : null;
+            currentCompressionQuota = null;
             updateAccessUI();
             return Boolean(storedUser);
         } catch (error) {
@@ -642,6 +722,7 @@ async function loadServerSession({ retries = 2, preserveExistingSubscription = f
         console.warn("Server session unavailable; using Telegram browser fallback", lastError);
     }
 
+    currentCompressionQuota = null;
     updateAccessUI();
     return Boolean(storedUser);
 }
@@ -838,7 +919,7 @@ async function initializeMembership() {
             updateAccessUI();
             closeModal("paymentModal");
             hideSubscriptionPlans();
-            logMessage("Your 3-day free trial is active. Compression is now unlocked.", "success");
+            logMessage("Your 3-day free trial is active with 3 video patches per day.", "success");
 
             await loadServerSession({
                 retries: 3,
@@ -858,7 +939,7 @@ async function initializeMembership() {
                 closeModal("paymentModal");
                 hideSubscriptionPlans();
                 updateAccessUI();
-                logMessage("Your 3-day free trial is active. Compression is now unlocked.", "success");
+                logMessage("Your 3-day free trial is active with 3 video patches per day.", "success");
                 return;
             }
 
@@ -2433,6 +2514,21 @@ function updatePatchButton() {
         return;
     }
 
+    if (isFreeCompressionQuotaExhausted()) {
+        patchBtn.disabled = true;
+        patchBtn.dataset.accessState = "daily-limit-reached";
+        patchBtn.title = "FREE plan limit reached: 3 compressions per day.";
+        if (label) label.textContent = "Daily Limit Reached";
+        if (hint) {
+            hint.hidden = false;
+            hint.textContent = "FREE limit reached (3/3 today). It resets at midnight Cambodia time. Upgrade to PRO, PREMIUM, or MAX for unlimited patching.";
+            hint.dataset.action = "plans";
+            const plansPanel = document.getElementById("subscriptionPanel");
+            hint.setAttribute("aria-expanded", String(Boolean(plansPanel && !plansPanel.hidden)));
+        }
+        return;
+    }
+
     patchBtn.dataset.accessState = "active";
     patchBtn.removeAttribute("title");
     if (hint) hint.hidden = true;
@@ -2775,6 +2871,14 @@ document.addEventListener("visibilitychange", () => {
 
 patchBtn.addEventListener("click", async () => {
     if (!requireActiveSubscription()) return;
+    if (isFreeCompressionQuotaExhausted()) {
+        logMessage(
+            "FREE plan daily limit reached (3/3). It resets at midnight Cambodia time. PRO, PREMIUM, and MAX have unlimited patching.",
+            "warning",
+        );
+        updatePatchButton();
+        return;
+    }
     const failedItems = selectedFiles.filter((f) => f.status === "error");
     if (failedItems.length > 0) {
         for (const item of failedItems) {
@@ -2849,6 +2953,14 @@ patchBtn.addEventListener("click", async () => {
         logMessage(`[${i + 1}/${pendingItems.length}] ${item.name}`, "info");
 
         try {
+            const quota = await reserveCompressionUse();
+            if (quota?.planId === "free") {
+                logMessage(
+                    `  FREE daily usage: ${quota.used}/${quota.limit} (remaining ${quota.remaining})`,
+                    quota.remaining > 0 ? "info" : "warning",
+                );
+            }
+
             const result = await patchSingleFile(item);
             if (isCancelled) {
                 item.status = "pending";
@@ -2955,6 +3067,22 @@ patchBtn.addEventListener("click", async () => {
         } catch (error) {
             if (isCancelled) {
                 item.status = "pending";
+                break;
+            }
+            if (error?.code === "DAILY_FREE_LIMIT_REACHED") {
+                item.status = "pending";
+                item.checked = true;
+                logMessage(
+                    "  FREE daily limit reached (3/3). Remaining videos were not patched. The limit resets at midnight Cambodia time; PRO, PREMIUM, and MAX are unlimited.",
+                    "warning",
+                );
+                break;
+            }
+            if (error?.code === "SUBSCRIPTION_REQUIRED" || error?.code === "LOGIN_REQUIRED") {
+                item.status = "pending";
+                item.checked = true;
+                logMessage(`  Access changed: ${error.message}`, "warning");
+                await loadServerSession({ retries: 1 });
                 break;
             }
             item.status = "error";

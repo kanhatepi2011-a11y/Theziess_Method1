@@ -34,6 +34,7 @@ const SUBSCRIPTIONS_TABLE = "theziess_subscriptions_v5";
 const FREE_TRIALS_TABLE = "theziess_free_trials_v5";
 const PAYMENTS_TABLE = "theziess_payments_v5";
 const COMPRESSION_EVENTS_TABLE = "theziess_compression_events_v1";
+const DAILY_COMPRESSION_USAGE_TABLE = "theziess_daily_compression_usage_v1";
 const TIKTOK_CONNECTIONS_TABLE = "theziess_tiktok_connections_v1";
 const TIKTOK_UPLOADS_TABLE = "theziess_tiktok_uploads_v1";
 
@@ -237,6 +238,18 @@ export async function ensureSchema() {
       `);
 
       await pool.query(`
+        CREATE TABLE IF NOT EXISTS ${DAILY_COMPRESSION_USAGE_TABLE} (
+          id BIGSERIAL PRIMARY KEY,
+          user_key TEXT NOT NULL,
+          usage_date DATE NOT NULL,
+          usage_count INTEGER NOT NULL DEFAULT 0 CHECK (usage_count >= 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (user_key, usage_date)
+        )
+      `);
+
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS ${TIKTOK_CONNECTIONS_TABLE} (
           id BIGSERIAL PRIMARY KEY,
           user_key TEXT UNIQUE NOT NULL,
@@ -290,6 +303,12 @@ export async function ensureSchema() {
       await pool.query(`
         CREATE INDEX IF NOT EXISTS theziess_compression_events_v1_user_created_idx
           ON ${COMPRESSION_EVENTS_TABLE}(user_key, created_at DESC)
+      `);
+
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS theziess_daily_compression_usage_v1_user_date_idx
+          ON ${DAILY_COMPRESSION_USAGE_TABLE}(user_key, usage_date DESC)
       `);
 
       await pool.query(`
@@ -747,6 +766,131 @@ function normalizeByteCount(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
   return Math.min(Math.trunc(number), Number.MAX_SAFE_INTEGER);
+}
+
+const FREE_DAILY_COMPRESSION_LIMIT = 3;
+const COMPRESSION_QUOTA_TIME_ZONE = "Asia/Phnom_Penh";
+
+function publicCompressionQuota({ planId, used = 0, resetAt = null }) {
+  const unlimited = planId === "pro" || planId === "premium" || planId === "max";
+  const normalizedUsed = Math.max(0, Number(used) || 0);
+
+  return {
+    planId,
+    unlimited,
+    limit: unlimited ? null : FREE_DAILY_COMPRESSION_LIMIT,
+    used: unlimited ? 0 : normalizedUsed,
+    remaining: unlimited
+      ? null
+      : Math.max(0, FREE_DAILY_COMPRESSION_LIMIT - normalizedUsed),
+    resetAt: unlimited || !resetAt ? null : new Date(resetAt).toISOString(),
+    timeZone: COMPRESSION_QUOTA_TIME_ZONE,
+  };
+}
+
+async function readFreeCompressionUsage(userId, client = pool) {
+  const result = await client.query(
+    `
+      SELECT
+        COALESCE(usage.usage_count, 0)::INTEGER AS usage_count,
+        (
+          (date_trunc('day', NOW() AT TIME ZONE $2) + INTERVAL '1 day')
+          AT TIME ZONE $2
+        ) AS reset_at
+      FROM (SELECT 1) seed
+      LEFT JOIN ${DAILY_COMPRESSION_USAGE_TABLE} usage
+        ON usage.user_key = $1::TEXT
+       AND usage.usage_date = (NOW() AT TIME ZONE $2)::DATE
+      LIMIT 1
+    `,
+    [String(userId), COMPRESSION_QUOTA_TIME_ZONE],
+  );
+
+  return {
+    used: Number(result.rows[0]?.usage_count || 0),
+    resetAt: result.rows[0]?.reset_at || null,
+  };
+}
+
+export async function getCompressionQuota(userId) {
+  await ensureSchema();
+
+  const subscription = await findActiveSubscription(userId);
+  if (!subscription) {
+    const error = new Error("An active subscription is required.");
+    error.code = "SUBSCRIPTION_REQUIRED";
+    throw error;
+  }
+
+  const planId = String(subscription.plan_id || "").toLowerCase();
+  if (planId !== "free") {
+    return publicCompressionQuota({ planId });
+  }
+
+  const usage = await readFreeCompressionUsage(userId);
+  return publicCompressionQuota({
+    planId,
+    used: usage.used,
+    resetAt: usage.resetAt,
+  });
+}
+
+export async function reserveCompressionQuota(userId) {
+  await ensureSchema();
+
+  // Always re-read access from PostgreSQL instead of trusting the signed
+  // browser session. This makes plan upgrades/revocations take effect here.
+  const subscription = await findActiveSubscription(userId);
+  if (!subscription) {
+    const error = new Error("An active subscription is required.");
+    error.code = "SUBSCRIPTION_REQUIRED";
+    throw error;
+  }
+
+  const planId = String(subscription.plan_id || "").toLowerCase();
+  if (planId !== "free") {
+    return publicCompressionQuota({ planId });
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO ${DAILY_COMPRESSION_USAGE_TABLE} (
+        user_key,
+        usage_date,
+        usage_count
+      )
+      VALUES (
+        $1::TEXT,
+        (NOW() AT TIME ZONE $2)::DATE,
+        1
+      )
+      ON CONFLICT (user_key, usage_date)
+      DO UPDATE SET
+        usage_count = ${DAILY_COMPRESSION_USAGE_TABLE}.usage_count + 1,
+        updated_at = NOW()
+      WHERE ${DAILY_COMPRESSION_USAGE_TABLE}.usage_count < $3
+      RETURNING usage_count
+    `,
+    [String(userId), COMPRESSION_QUOTA_TIME_ZONE, FREE_DAILY_COMPRESSION_LIMIT],
+  );
+
+  const usage = await readFreeCompressionUsage(userId);
+  const quota = publicCompressionQuota({
+    planId,
+    used: usage.used,
+    resetAt: usage.resetAt,
+  });
+
+  if (!result.rows[0]) {
+    const error = new Error(
+      `FREE plan daily limit reached (${FREE_DAILY_COMPRESSION_LIMIT}/${FREE_DAILY_COMPRESSION_LIMIT}).`,
+    );
+    error.code = "DAILY_FREE_LIMIT_REACHED";
+    error.quota = quota;
+    throw error;
+  }
+
+  return quota;
 }
 
 export async function recordCompressionEvent({
