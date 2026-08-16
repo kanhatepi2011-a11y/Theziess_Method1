@@ -726,10 +726,32 @@ async function loadServerSession({ retries = 2, preserveExistingSubscription = f
 }
 
 
+function revealHydratedApp() {
+    if (window.__theziessAuthBootFailsafe) {
+        clearTimeout(window.__theziessAuthBootFailsafe);
+        window.__theziessAuthBootFailsafe = null;
+    }
+
+    // Wait until the browser has applied the final authenticated DOM state.
+    // This prevents a one-frame flash of the static logged-out placeholders.
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            document.documentElement.classList.remove("auth-booting");
+        });
+    });
+}
+
 async function initializeMembership() {
     const params = new URLSearchParams(location.search);
     const returningFromTelegram = params.get("telegram_login") === "success";
-    await loadServerSession({ retries: returningFromTelegram ? 4 : 2 });
+
+    try {
+        // loadServerSession also waits for the FREE daily quota, so the patch
+        // button/hint cannot change again immediately after first paint.
+        await loadServerSession({ retries: returningFromTelegram ? 4 : 2 });
+    } finally {
+        revealHydratedApp();
+    }
 
     // New/unauthenticated visitors should immediately see the Telegram login
     // screen. Existing users with a valid server session (or the stored

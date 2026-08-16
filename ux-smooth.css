@@ -122,6 +122,7 @@ textarea:focus-visible {
 .header-account-area {
   width: 100%;
   margin: 0;
+  min-height: 58px;
 }
 
 .header-login-button,
@@ -1073,5 +1074,13 @@ body[data-app-view="check"] .panel-video-check:not([hidden]) {
   .app-nav-button:focus:not(:focus-visible),
   .patch-access-hint:focus:not(:focus-visible) {
     outline: none;
+  }
+}
+
+
+/* AUTH HYDRATION LAYOUT STABILITY — 2026-08-16 */
+@media (max-width: 760px) {
+  .header-account-area {
+    min-height: 66px;
   }
 }

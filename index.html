@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="km">
+<html lang="km" class="auth-booting">
 <head>
   <meta charset="UTF-8">
 
@@ -53,7 +53,7 @@
 
   <link
     rel="stylesheet"
-    href="ux-smooth.css?v=20260816-mobile-jitter-fix"
+    href="ux-smooth.css?v=20260816-auth-layout-fix"
   >
 
   <script>
@@ -72,6 +72,28 @@
   </script>
 
   <style>
+    /* Prevent the logged-out placeholder UI from flashing before the
+       Telegram session and FREE-plan quota have finished hydrating. */
+    html {
+      background: #07030f;
+    }
+
+    html.auth-booting body {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    body {
+      opacity: 1;
+      transition: opacity 120ms ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      body {
+        transition: none;
+      }
+    }
+
     .telegram-login-actions {
       display: grid;
       gap: 12px;
@@ -103,6 +125,13 @@
 </head>
 
 <body>
+  <script>
+    // Failsafe only. app.js reveals the page as soon as auth/quota hydration is complete.
+    window.__theziessAuthBootFailsafe = window.setTimeout(() => {
+      document.documentElement.classList.remove("auth-booting");
+    }, 3000);
+  </script>
+
   <div class="page">
     <header class="panel panel-header">
       <div class="header">
@@ -1408,7 +1437,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260807-auto-login-v3"
+    src="app.js?v=20260816-auth-layout-fix"
   ></script>
 </body>
 </html>
