@@ -2977,6 +2977,25 @@ body[data-app-view="check"] .container {
   overflow-wrap: anywhere;
 }
 
+
+.video-check-method-link {
+  max-width: 100%;
+  display: inline-block;
+  color: #67e8f9;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: color .18s ease, text-shadow .18s ease;
+}
+
+.video-check-method-link:hover,
+.video-check-method-link:focus-visible {
+  color: #cffafe;
+  text-shadow: 0 0 12px rgba(103, 232, 249, .38);
+}
+
 .video-check-metric-source {
   display: block;
   max-width: 100%;

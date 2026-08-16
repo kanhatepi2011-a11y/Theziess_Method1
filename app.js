@@ -1120,6 +1120,57 @@ function resetTikTokVideoResult() {
     if (fallback) fallback.hidden = false;
 }
 
+function getMethodWebsiteUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+
+    // Accept an explicit http(s) URL, or discover a normal domain such as
+    // example.com / example.site / example.net inside the metadata text.
+    const explicitUrl = raw.match(/https?:\/\/[^\s<>"']+/i)?.[0] || null;
+    const domain = raw.match(
+        /(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{2,5})?(?:\/[^\s<>"']*)?/i,
+    )?.[0] || null;
+
+    const candidate = explicitUrl || domain;
+    if (!candidate) return null;
+
+    // Remove punctuation that may have been appended around metadata text.
+    const cleaned = candidate.replace(/[),.;!?]+$/g, "");
+
+    try {
+        const url = new URL(/^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+        if (!url.hostname || !url.hostname.includes(".")) return null;
+        return url.href;
+    } catch {
+        return null;
+    }
+}
+
+function renderVideoCheckMethod(value) {
+    const element = document.getElementById("videoCheckMethod");
+    if (!element) return;
+
+    const text = value ? String(value).trim() : "❌ Not detected";
+    element.replaceChildren();
+
+    const href = value ? getMethodWebsiteUrl(text) : null;
+    if (!href) {
+        element.textContent = text || "❌ Not detected";
+        return;
+    }
+
+    const link = document.createElement("a");
+    link.className = "video-check-method-link";
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = text;
+    link.title = `Open ${href}`;
+    link.setAttribute("aria-label", `Open ${text}`);
+    element.appendChild(link);
+}
+
 function renderTikTokVideoResult(payload) {
     const video = payload?.video || {};
     const thumbnail = document.getElementById("videoCheckThumbnail");
@@ -1155,10 +1206,7 @@ function renderTikTokVideoResult(payload) {
         "videoCheckFileSize",
         Number(video.fileSize) > 0 ? formatFileSize(Number(video.fileSize)) : "Unavailable",
     );
-    setElementText(
-        "videoCheckMethod",
-        video.method ? String(video.method) : "❌ Not detected",
-    );
+    renderVideoCheckMethod(video.method);
 
     const note = document.querySelector("#videoCheckNote span");
     if (note) {
