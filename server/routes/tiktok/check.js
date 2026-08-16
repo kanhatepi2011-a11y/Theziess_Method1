@@ -98,6 +98,9 @@ function externalResultPayload(result, requestedUrl, oEmbed = null) {
       audioCodec: result?.audio_codec || null,
       pixelFormat: result?.pixel_format || null,
       qualityScore: result?.quality_score || null,
+      method: result?.method_detected
+        ? (String(result?.method_name || "TheziessMethod.site").trim() || "TheziessMethod.site")
+        : null,
     },
     availability: {
       resolution: Boolean(width && height),
@@ -913,6 +916,20 @@ function parseFullBoxTiming(bytes, box) {
   };
 }
 
+function containsAsciiText(bytes, text) {
+  if (!bytes || !text) return false;
+  const needle = Array.from(String(text), (char) => char.charCodeAt(0) & 0xff);
+  if (!needle.length || needle.length > bytes.length) return false;
+
+  outer: for (let i = 0; i <= bytes.length - needle.length; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) {
+      if (bytes[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
 function parseMp4Moov(moovBytes) {
   const rootBoxes = listBoxes(moovBytes, 0, moovBytes.length);
   const moov = rootBoxes.find((box) => box.type === "moov");
@@ -992,6 +1009,9 @@ function parseMp4Moov(moovBytes) {
       duration: Number.isFinite(duration) && duration > 0 ? duration : null,
       fps,
       codec,
+      method: containsAsciiText(moovBytes, "TheziessMethod.site")
+        ? "TheziessMethod.site"
+        : null,
     };
   }
 
@@ -1273,6 +1293,7 @@ export default async function handler(req, res) {
         duration: duration || null,
         fileSize: fileSize ? Math.round(fileSize) : null,
         codec: probe.metadata?.codec || pageData.codec || null,
+        method: probe.metadata?.method || null,
       },
       availability: {
         resolution: Boolean(probe.metadata?.width || pageData.width),

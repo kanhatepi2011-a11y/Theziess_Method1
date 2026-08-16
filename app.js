@@ -1155,6 +1155,10 @@ function renderTikTokVideoResult(payload) {
         "videoCheckFileSize",
         Number(video.fileSize) > 0 ? formatFileSize(Number(video.fileSize)) : "Unavailable",
     );
+    setElementText(
+        "videoCheckMethod",
+        video.method ? String(video.method) : "❌ Not detected",
+    );
 
     const note = document.querySelector("#videoCheckNote span");
     if (note) {
