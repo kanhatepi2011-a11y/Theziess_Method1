@@ -1034,3 +1034,44 @@ body[data-app-view="check"] .panel-video-check:not([hidden]) {
     transition-duration: .01ms !important;
   }
 }
+
+
+/* =========================================================
+   MOBILE TOUCH JITTER FIX — 2026-08-16
+   Prevent persistent :hover/:focus/:active transforms from
+   moving the Profile nav item and patch access hint on phones.
+   ========================================================= */
+@media (hover: none), (pointer: coarse) {
+  .app-nav-button,
+  .patch-access-hint {
+    transform: none !important;
+    will-change: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .app-nav-button {
+    transition-property: background, background-color, color, border-color, box-shadow, opacity !important;
+  }
+
+  .patch-access-hint {
+    transition-property: background, background-color, color, border-color, box-shadow, opacity !important;
+  }
+
+  .app-nav-button:hover,
+  .app-nav-button:focus,
+  .app-nav-button:focus-visible,
+  .app-nav-button:active,
+  .app-nav-button.active,
+  .patch-access-hint:hover,
+  .patch-access-hint:focus,
+  .patch-access-hint:focus-visible,
+  .patch-access-hint:active {
+    transform: none !important;
+  }
+
+  .app-nav-button:focus:not(:focus-visible),
+  .patch-access-hint:focus:not(:focus-visible) {
+    outline: none;
+  }
+}
