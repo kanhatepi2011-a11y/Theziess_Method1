@@ -65,6 +65,23 @@ async function pollExternalFpsJob(jobId) {
   });
 }
 
+function cleanMethodMetadataText(value) {
+  if (value === null || value === undefined) return null;
+
+  const text = String(value).replace(/\0/g, "").trim();
+  if (!text) return null;
+  if (text.toLowerCase() === "not detected") return null;
+
+  return text.slice(0, 256);
+}
+
+function normalizeExternalMethodName(result) {
+  // New checker versions return the actual metadata text in method_name.
+  // Never replace it with a hard-coded website name.
+  if (result?.method_detected === false) return null;
+  return cleanMethodMetadataText(result?.method_name);
+}
+
 function externalResultPayload(result, requestedUrl, oEmbed = null) {
   const width = Number(result?.width) || null;
   const height = Number(result?.height) || null;
@@ -98,9 +115,7 @@ function externalResultPayload(result, requestedUrl, oEmbed = null) {
       audioCodec: result?.audio_codec || null,
       pixelFormat: result?.pixel_format || null,
       qualityScore: result?.quality_score || null,
-      method: result?.method_detected
-        ? (String(result?.method_name || "TheziessMethod.site").trim() || "TheziessMethod.site")
-        : null,
+      method: normalizeExternalMethodName(result),
     },
     availability: {
       resolution: Boolean(width && height),
@@ -930,6 +945,89 @@ function containsAsciiText(bytes, text) {
   return false;
 }
 
+function findByteSequence(bytes, needle, start = 0, end = bytes?.length || 0) {
+  if (!bytes || !needle?.length) return -1;
+  const safeStart = Math.max(0, start);
+  const safeEnd = Math.min(bytes.length, end);
+
+  outer: for (let i = safeStart; i <= safeEnd - needle.length; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) {
+      if (bytes[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+
+  return -1;
+}
+
+function readAtomSize(bytes, atomStart, limit = bytes?.length || 0) {
+  if (!bytes || atomStart < 0 || atomStart + 8 > limit) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const size32 = readUint32(view, atomStart);
+
+  if (size32 === 0) {
+    return { size: limit - atomStart, headerSize: 8 };
+  }
+
+  if (size32 === 1) {
+    const size64 = readUint64(view, atomStart + 8);
+    if (!size64 || atomStart + 16 > limit) return null;
+    return { size: size64, headerSize: 16 };
+  }
+
+  if (!size32 || size32 < 8) return null;
+  return { size: size32, headerSize: 8 };
+}
+
+function extractMp4ArtistMetadata(bytes) {
+  if (!bytes?.length) return null;
+
+  // QuickTime/iTunes Artist atom: 0xA9 + "ART" (©ART)
+  const artistMarker = Uint8Array.from([0xa9, 0x41, 0x52, 0x54]);
+  const dataMarker = Uint8Array.from([0x64, 0x61, 0x74, 0x61]); // "data"
+  let searchFrom = 0;
+
+  while (searchFrom < bytes.length) {
+    const typePos = findByteSequence(bytes, artistMarker, searchFrom, bytes.length);
+    if (typePos < 0) return null;
+    searchFrom = typePos + artistMarker.length;
+
+    const artistStart = typePos - 4;
+    const artistInfo = readAtomSize(bytes, artistStart, bytes.length);
+    if (!artistInfo) continue;
+
+    const artistEnd = artistStart + artistInfo.size;
+    if (artistEnd > bytes.length || artistEnd <= typePos + 4) continue;
+
+    const dataTypePos = findByteSequence(bytes, dataMarker, typePos + 4, artistEnd);
+    if (dataTypePos < 4) continue;
+
+    const dataStart = dataTypePos - 4;
+    const dataInfo = readAtomSize(bytes, dataStart, artistEnd);
+    if (!dataInfo) continue;
+
+    const dataEnd = dataStart + dataInfo.size;
+    // MP4 metadata data atom layout:
+    // 8-byte box header + 4-byte type/flags + 4-byte locale + UTF-8 text.
+    const textStart = dataStart + dataInfo.headerSize + 8;
+    if (dataEnd > artistEnd || textStart > dataEnd) continue;
+
+    const rawText = bytes.slice(textStart, dataEnd);
+    let decoded = "";
+
+    try {
+      decoded = new TextDecoder("utf-8").decode(rawText);
+    } catch {
+      decoded = Array.from(rawText, (value) => String.fromCharCode(value)).join("");
+    }
+
+    const methodText = cleanMethodMetadataText(decoded);
+    if (methodText) return methodText;
+  }
+
+  return null;
+}
+
 function parseMp4Moov(moovBytes) {
   const rootBoxes = listBoxes(moovBytes, 0, moovBytes.length);
   const moov = rootBoxes.find((box) => box.type === "moov");
@@ -1009,9 +1107,7 @@ function parseMp4Moov(moovBytes) {
       duration: Number.isFinite(duration) && duration > 0 ? duration : null,
       fps,
       codec,
-      method: containsAsciiText(moovBytes, "TheziessMethod.site")
-        ? "TheziessMethod.site"
-        : null,
+      method: extractMp4ArtistMetadata(moovBytes),
     };
   }
 
