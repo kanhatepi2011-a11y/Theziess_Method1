@@ -25,11 +25,11 @@ export function getTelegramWelcomeConfig() {
   return {
     enabled: environmentBoolean("TELEGRAM_WELCOME_ENABLED", true),
     language: normalizeLanguage(
-      environment("TELEGRAM_WELCOME_LANGUAGE", "both"),
+      environment("TELEGRAM_WELCOME_LANGUAGE", "km"),
     ),
     khmerTemplate: environment(
       "TELEGRAM_WELCOME_KHMER_TEMPLATE",
-      "សូមស្វាគមន៍ {mention} មកកាន់ក្រុម <b>{group}</b> 🎉",
+      "សូមស្វាគមន៍ {mention} មកកាន់ក្រុម <b>{group}</b>",
     ),
     englishTemplate: environment(
       "TELEGRAM_WELCOME_ENGLISH_TEMPLATE",
@@ -41,6 +41,13 @@ export function getTelegramWelcomeConfig() {
     websiteLabel: environment(
       "TELEGRAM_WELCOME_WEBSITE_LABEL",
       "🌐 Website",
+    ),
+    adminUsername: environment("TELEGRAM_WELCOME_ADMIN_USERNAME", "thephal")
+      .replace(/^@/, "")
+      .toLowerCase(),
+    adminContactTemplate: environment(
+      "TELEGRAM_WELCOME_ADMIN_CONTACT_TEMPLATE",
+      "ទំនាក់ទំនងទៅកាន់Admin: {adminMention}",
     ),
   };
 }
@@ -63,18 +70,29 @@ function applyWelcomeTemplate(template, values) {
   return String(template || "")
     .replaceAll("{mention}", values.mention)
     .replaceAll("{name}", values.name)
-    .replaceAll("{group}", values.group);
+    .replaceAll("{group}", values.group)
+    .replaceAll("{adminMention}", values.adminMention);
 }
 
 export function buildTelegramWelcomeMessage(
   member,
   chat,
   config = getTelegramWelcomeConfig(),
+  adminMember = null,
 ) {
+  const adminUsername = String(config.adminUsername || "thephal")
+    .replace(/^@/, "")
+    .trim();
+
+  const adminMention = adminMember
+    ? telegramMemberMention(adminMember)
+    : `<a href="https://t.me/${escapeTelegramHtml(adminUsername)}">Admin</a>`;
+
   const values = {
     mention: telegramMemberMention(member),
     name: escapeTelegramHtml(telegramMemberDisplayName(member)),
     group: escapeTelegramHtml(chat?.title || "this group"),
+    adminMention,
   };
 
   const messages = [];
@@ -85,7 +103,41 @@ export function buildTelegramWelcomeMessage(
     messages.push(applyWelcomeTemplate(config.englishTemplate, values));
   }
 
-  return messages.filter(Boolean).join("\n\n");
+  if (config.adminContactTemplate) {
+    messages.push(applyWelcomeTemplate(config.adminContactTemplate, values));
+  }
+
+  return messages.filter(Boolean).join("\n");
+}
+
+export async function resolveTelegramWelcomeAdmin(
+  chatId,
+  config = getTelegramWelcomeConfig(),
+) {
+  const targetUsername = String(config.adminUsername || "thephal")
+    .replace(/^@/, "")
+    .trim()
+    .toLowerCase();
+
+  if (!chatId || !targetUsername) return null;
+
+  try {
+    const administrators = await telegramApi("getChatAdministrators", {
+      chat_id: String(chatId),
+    });
+
+    if (!Array.isArray(administrators)) return null;
+
+    const match = administrators.find((entry) => {
+      const username = String(entry?.user?.username || "").trim().toLowerCase();
+      return username === targetUsername;
+    });
+
+    return match?.user || null;
+  } catch {
+    // Welcome messages must still work if Telegram cannot resolve the admin.
+    return null;
+  }
 }
 
 export function buildTelegramWelcomeKeyboard(

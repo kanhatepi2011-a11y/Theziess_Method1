@@ -26,17 +26,29 @@ const config = {
   websiteUrl: "https://example.com",
   rulesLabel: "Rules",
   websiteLabel: "Website",
+  adminUsername: "thephal",
+  adminContactTemplate: "ទំនាក់ទំនងទៅកាន់Admin: {adminMention}",
 };
 
 describe("Telegram welcome system", () => {
   it("mentions the human member and includes the group name in both languages", () => {
-    const message = buildTelegramWelcomeMessage(member, chat, config);
+    const admin = {
+      id: 999999,
+      first_name: "Sokphal",
+      username: "thephal",
+      is_bot: false,
+    };
+    const message = buildTelegramWelcomeMessage(member, chat, config, admin);
 
     expect(message).toContain('tg://user?id=123456');
     expect(message).toContain("Sok Phal");
     expect(message).toContain("TheZiess Community");
     expect(message).toContain("សូមស្វាគមន៍");
     expect(message).toContain("Welcome");
+    expect(message).toContain("ទំនាក់ទំនងទៅកាន់Admin:");
+    expect(message).toContain('tg://user?id=999999');
+    expect(message).toContain("Sokphal");
+    expect(message).not.toContain("@thephal");
   });
 
   it("escapes member names safely", () => {

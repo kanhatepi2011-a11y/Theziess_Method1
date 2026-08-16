@@ -25,6 +25,7 @@ import {
   getTelegramWelcomeConfig,
   isHumanTelegramMember,
   isTelegramGroupAdmin,
+  resolveTelegramWelcomeAdmin,
 } from "../_telegram-welcome.js";
 
 const PAGE_SIZE = 8;
@@ -607,7 +608,8 @@ async function sendWelcomeMessage(chat, member) {
   const config = getTelegramWelcomeConfig();
   if (!config.enabled || !isHumanTelegramMember(member)) return;
 
-  const text = buildTelegramWelcomeMessage(member, chat, config);
+  const adminMember = await resolveTelegramWelcomeAdmin(chat.id, config);
+  const text = buildTelegramWelcomeMessage(member, chat, config, adminMember);
   if (!text) return;
 
   const replyMarkup = buildTelegramWelcomeKeyboard(config);
@@ -724,6 +726,13 @@ async function handleMessage(message) {
   if (!isTelegramAdmin(senderId)) {
     // Admin-only commands are intentionally silent for non-admin users.
     // This avoids exposing admin configuration or creating noise in groups.
+    return;
+  }
+
+  // In groups, normal admin conversation must stay normal conversation.
+  // Do not open the admin dashboard just because a configured admin sent text.
+  // Admin features are only triggered by explicit bot commands such as /admin.
+  if (isGroupChat && !command) {
     return;
   }
 
