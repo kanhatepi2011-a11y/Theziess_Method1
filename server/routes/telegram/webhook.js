@@ -124,7 +124,7 @@ function dashboardKeyboard() {
         { text: "🆓 Trials", callback_data: "admin:trials" },
       ],
       [
-        { text: "➕ Add Subscription", callback_data: "admin:grant:help" },
+        { text: "🔄 Change Plan", callback_data: "admin:grant:help" },
       ],
       [{ text: "💳 Payments", callback_data: "admin:payments" }],
     ],
@@ -297,6 +297,9 @@ async function sendUserDetails(chatId, lookup) {
     reply_markup: {
       inline_keyboard: [
         [
+          { text: "🆓 Set FREE", callback_data: `admin:grant:${user.id}:free` },
+        ],
+        [
           { text: "⚡ Grant PRO", callback_data: `admin:grant:${user.id}:pro` },
           { text: "💎 Grant PREMIUM", callback_data: `admin:grant:${user.id}:premium` },
         ],
@@ -314,22 +317,25 @@ async function sendGrantHelp(chatId) {
   await sendTelegramMessage(
     chatId,
     [
-      "<b>➕ Add a paid subscription</b>",
+      "<b>➕ Change user plan</b>",
       "",
-      "Paid plans cannot be claimed from the website. Only a configured Telegram admin can assign them.",
+      "Only a configured Telegram admin can change a user between FREE, PRO, PREMIUM, and MAX.",
       "",
       "<b>Commands</b>",
+      "<code>/grant TELEGRAM_ID free</code>",
       "<code>/grant TELEGRAM_ID pro</code>",
       "<code>/grant TELEGRAM_ID premium</code>",
       "<code>/grant TELEGRAM_ID max</code>",
+      "<code>/grant @username free</code>",
       "<code>/grant @username pro</code>",
       "",
       "<b>Plan durations</b>",
+      "FREE: 3 days · max 3 videos/day",
       "PRO: 30 days",
       "PREMIUM: 180 days",
       "MAX: 1 year (365 days)",
       "",
-      "You can also open <code>/user TELEGRAM_ID</code> and tap a Grant button.",
+      "You can also open <code>/user TELEGRAM_ID</code> and tap a plan button.",
       "",
       "To remove a paid plan: <code>/revoke TELEGRAM_ID</code>",
     ].join("\n"),
@@ -343,33 +349,43 @@ async function sendGrantHelp(chatId) {
 
 async function grantPlanToUser(chatId, lookup, planId, adminTelegramId) {
   const normalizedPlan = String(planId || "").trim().toLowerCase();
-  const allowedPlans = new Set(["pro", "premium", "max"]);
+  const allowedPlans = new Set(["free", "pro", "premium", "max"]);
 
   if (!lookup || !allowedPlans.has(normalizedPlan)) {
     await sendTelegramMessage(
       chatId,
-      "Usage: <code>/grant TELEGRAM_ID pro</code>, <code>premium</code>, or <code>max</code>.",
+      "Usage: <code>/grant TELEGRAM_ID free</code>, <code>pro</code>, <code>premium</code>, or <code>max</code>.",
     );
     return;
   }
 
   try {
-    const { grantAdminSubscription } = await getDatabaseModule();
-    const { user, subscription } = await grantAdminSubscription({
-      lookup,
-      planId: normalizedPlan,
-      adminTelegramId,
-    });
+    const database = await getDatabaseModule();
+    const { user, subscription } = normalizedPlan === "free"
+      ? await database.setAdminFreePlan({
+          lookup,
+          adminTelegramId,
+        })
+      : await database.grantAdminSubscription({
+          lookup,
+          planId: normalizedPlan,
+          adminTelegramId,
+        });
 
     let userNotified = false;
     try {
       await sendTelegramMessage(
         user.telegram_id,
         [
-          "✅ <b>Your TheZiess subscription is active</b>",
+          normalizedPlan === "free"
+            ? "🆓 <b>Your TheZiess plan was changed to FREE</b>"
+            : "✅ <b>Your TheZiess subscription is active</b>",
           "",
           `Plan: <b>${escapeTelegramHtml(planLabel(subscription.plan_id))}</b>`,
           `Expires: ${escapeTelegramHtml(subscription.expires_at ? formatDate(subscription.expires_at) : "No expiry date")}`,
+          ...(normalizedPlan === "free"
+            ? ["Daily limit: <b>3 videos/day</b>"]
+            : []),
           "",
           "Open or refresh the website to use video compression.",
         ].join("\n"),
@@ -385,7 +401,9 @@ async function grantPlanToUser(chatId, lookup, planId, adminTelegramId) {
     await sendTelegramMessage(
       chatId,
       [
-        "✅ <b>Subscription assigned</b>",
+        normalizedPlan === "free"
+          ? "✅ <b>User changed to FREE</b>"
+          : "✅ <b>Subscription assigned</b>",
         "",
         `User: <b>${escapeTelegramHtml(userName(user))}</b>`,
         `Telegram ID: <code>${escapeTelegramHtml(user.telegram_id)}</code>`,
@@ -394,7 +412,9 @@ async function grantPlanToUser(chatId, lookup, planId, adminTelegramId) {
         `Expires: ${escapeTelegramHtml(subscription.expires_at ? formatDate(subscription.expires_at) : "No expiry date")}`,
         `User notification: <b>${userNotified ? "Sent" : "Not delivered"}</b>`,
         "",
-        "The user should reopen the website or refresh it to load the new subscription.",
+        normalizedPlan === "free"
+          ? "FREE access is active for 3 days with the 3-videos-per-day quota."
+          : "The user should reopen the website or refresh it to load the new subscription.",
       ].join("\n"),
       {
         reply_markup: {
@@ -408,11 +428,11 @@ async function grantPlanToUser(chatId, lookup, planId, adminTelegramId) {
   } catch (error) {
     const message = error?.code === "USER_NOT_FOUND"
       ? "User not found. The user must log in to the website with Telegram at least once before an admin can assign a plan."
-      : error?.message || "Unable to assign the subscription.";
+      : error?.message || "Unable to change the user plan.";
 
     await sendTelegramMessage(
       chatId,
-      `❌ <b>Subscription was not assigned</b>\n\n${escapeTelegramHtml(message)}`,
+      `❌ <b>User plan was not changed</b>\n\n${escapeTelegramHtml(message)}`,
       {
         reply_markup: {
           inline_keyboard: [[{ text: "🏠 Admin", callback_data: "admin:home" }]],
@@ -567,7 +587,7 @@ async function handleAdminAction(chatId, action, adminTelegramId) {
   const userMatch = /^admin:user:(\d+)$/.exec(action);
   if (userMatch) return sendUserDetails(chatId, userMatch[1]);
 
-  const grantMatch = /^admin:grant:(\d+):(pro|premium|max)$/.exec(action);
+  const grantMatch = /^admin:grant:(\d+):(free|pro|premium|max)$/.exec(action);
   if (grantMatch) {
     return grantPlanToUser(
       chatId,
@@ -646,7 +666,7 @@ async function handleMessage(message) {
   const isGroupChat = ["group", "supergroup"].includes(message.chat?.type);
   const knownCommands = new Set([
     "testwelcome", "id", "whoami", "ping", "start", "help", "admin",
-    "stats", "users", "user", "grant", "addplan", "addsubscription",
+    "stats", "users", "user", "grant", "setplan", "addplan", "addsubscription",
     "revoke", "removeplan", "plans", "subscriptions", "trials", "payments",
   ]);
 
@@ -734,7 +754,7 @@ async function handleMessage(message) {
     return;
   }
 
-  if (command === "grant" || command === "addplan" || command === "addsubscription") {
+  if (command === "grant" || command === "setplan" || command === "addplan" || command === "addsubscription") {
     const [lookup, planId] = argument.split(/\s+/).filter(Boolean);
     await grantPlanToUser(chatId, lookup, planId, senderId);
     return;

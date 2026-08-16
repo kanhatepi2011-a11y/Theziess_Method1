@@ -249,7 +249,6 @@ const fileInput = document.getElementById("fileInput");
 const patchBtn = document.getElementById("patchBtn");
 const clearBtn = document.getElementById("clearBtn");
 const dropZone = document.getElementById("dropZone");
-const statusLog = document.getElementById("statusLog");
 const progressBar = document.getElementById("progressBar");
 const progressTrack = document.getElementById("progressTrack");
 const fileListEl = document.getElementById("fileList");
@@ -259,7 +258,6 @@ const historyHeader = document.getElementById("historyHeader");
 const historySection = document.getElementById("historySection");
 const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 const queueAndActionsWrapper = document.querySelector(".queue-and-actions-wrapper");
-const systemStatusPanel = document.querySelector(".panel-log");
 const videoCheckSection = document.getElementById("videoCheckSection");
 const videoCheckForm = document.getElementById("videoCheckForm");
 const videoCheckUrl = document.getElementById("videoCheckUrl");
@@ -1313,10 +1311,6 @@ function setPrimaryAppView(view) {
         queueAndActionsWrapper.hidden = !compressorOnly;
         queueAndActionsWrapper.setAttribute("aria-hidden", String(!compressorOnly));
     }
-    if (systemStatusPanel) {
-        systemStatusPanel.hidden = !compressorOnly;
-        systemStatusPanel.setAttribute("aria-hidden", String(!compressorOnly));
-    }
 
     setHistorySectionVisible(historyOnly);
 
@@ -1490,54 +1484,20 @@ function initializeApp() {
     adjustMobileLayout();
     window.addEventListener("resize", adjustMobileLayout);
 
-    const copyBtn = document.getElementById("copyLogBtn");
-    const copyToast = document.getElementById("copyLogToast");
-    if (copyBtn) {
-        let toastTimer = null;
-        copyBtn.addEventListener("click", async () => {
-            const text = [...statusLog.querySelectorAll(".log-row")]
-                .map((r) => r.textContent)
-                .join("\n");
-            if (!text) return;
-            try {
-                await navigator.clipboard.writeText(text);
-                if (copyToast) {
-                    copyToast.textContent = "Copied";
-                    copyToast.classList.add("show");
-                    clearTimeout(toastTimer);
-                    toastTimer = setTimeout(() => {
-                        copyToast.classList.remove("show");
-                    }, 1500);
-                }
-            } catch {
-                if (copyToast) {
-                    copyToast.textContent = "Copy failed";
-                    copyToast.classList.add("show");
-                    clearTimeout(toastTimer);
-                    toastTimer = setTimeout(() => {
-                        copyToast.classList.remove("show");
-                    }, 1500);
-                }
-            }
-        });
-    }
 }
 
 function logMessage(text, type = "info") {
-    const row = document.createElement("div");
-    row.className = `log-row log-${type}`;
-    row.textContent = text;
-    statusLog.appendChild(row);
-    statusLog.scrollTop = statusLog.scrollHeight;
+    // System Status UI was removed; keep diagnostics available in DevTools.
+    const method = type === "error" ? "error" : type === "warning" ? "warn" : "log";
+    console[method](`[${type}] ${text}`);
 }
 
 function clearLog() {
-    statusLog.innerHTML = "";
+    // No visible system log to clear.
 }
 
-function setLogCopyVisible(visible) {
-    const copyBtn = document.getElementById("copyLogBtn");
-    if (copyBtn) copyBtn.classList.toggle("visible", visible);
+function setLogCopyVisible(_visible) {
+    // System Status/copy-log UI was removed.
 }
 
 function setProgress(percent) {

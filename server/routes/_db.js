@@ -1221,6 +1221,85 @@ export async function listAdminRecentPayments(limit = 12) {
 const ADMIN_PAID_PLANS = new Set(["pro", "premium", "max"]);
 
 /**
+ * Force a user back onto the FREE plan from the Telegram admin bot.
+ * This is an admin override, so it may reactivate/restart a FREE trial that
+ * the user has used before. Active paid plans are cancelled first.
+ * The daily FREE compression counter is intentionally preserved so the
+ * global 3-videos-per-Cambodia-day rule cannot be bypassed by plan changes.
+ */
+export async function setAdminFreePlan({ lookup, adminTelegramId }) {
+  await ensureSchema();
+  const user = await findAdminUser(lookup);
+
+  if (!user) {
+    const error = new Error("User was not found.");
+    error.code = "USER_NOT_FOUND";
+    throw error;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `SELECT id FROM ${USERS_TABLE} WHERE id::TEXT = $1::TEXT FOR UPDATE`,
+      [String(user.id)],
+    );
+
+    await client.query(
+      `
+        UPDATE ${SUBSCRIPTIONS_TABLE}
+        SET status = 'cancelled', updated_at = NOW()
+        WHERE user_key = $1::TEXT
+          AND status = 'active'
+      `,
+      [String(user.id)],
+    );
+
+    const trialResult = await client.query(
+      `
+        INSERT INTO ${FREE_TRIALS_TABLE} (
+          user_key,
+          status,
+          starts_at,
+          expires_at,
+          updated_at
+        )
+        VALUES (
+          $1::TEXT,
+          'active',
+          NOW(),
+          NOW() + INTERVAL '3 days',
+          NOW()
+        )
+        ON CONFLICT (user_key)
+        DO UPDATE SET
+          status = 'active',
+          starts_at = NOW(),
+          expires_at = NOW() + INTERVAL '3 days',
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [String(user.id)],
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      user,
+      subscription: toFreeTrialSubscription(trialResult.rows[0]),
+      changedBy: String(adminTelegramId || ""),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Assign a paid plan from the Telegram admin bot. Public website requests do
  * not call this function. The caller must verify TELEGRAM_ADMIN_IDS first.
  */
