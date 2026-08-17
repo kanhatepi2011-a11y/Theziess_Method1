@@ -1109,9 +1109,14 @@ function resetTikTokVideoResult() {
     const thumbnail = document.getElementById("videoCheckThumbnail");
     const fallback = document.getElementById("videoCheckThumbnailFallback");
     const fpsSource = document.getElementById("videoCheckFpsSource");
+    const methodSource = document.getElementById("videoCheckMethodSource");
     if (fpsSource) {
         fpsSource.textContent = "";
         fpsSource.hidden = true;
+    }
+    if (methodSource) {
+        methodSource.textContent = "";
+        methodSource.hidden = true;
     }
     if (thumbnail) {
         thumbnail.hidden = true;
@@ -1149,14 +1154,28 @@ function getMethodWebsiteUrl(value) {
 
 function renderVideoCheckMethod(value) {
     const element = document.getElementById("videoCheckMethod");
+    const source = document.getElementById("videoCheckMethodSource");
     if (!element) return;
 
-    const text = value ? String(value).trim() : "❌ Not detected";
+    const text = value ? String(value).replace(/\0/g, "").trim() : "";
     element.replaceChildren();
+    element.dataset.state = text ? "extracted" : "empty";
 
-    const href = value ? getMethodWebsiteUrl(text) : null;
+    if (source) {
+        source.textContent = text
+            ? "Extracted from video metadata"
+            : "Nothing was extracted from the video";
+        source.hidden = false;
+    }
+
+    if (!text) {
+        element.textContent = "No method metadata in video";
+        return;
+    }
+
+    const href = getMethodWebsiteUrl(text);
     if (!href) {
-        element.textContent = text || "❌ Not detected";
+        element.textContent = text;
         return;
     }
 

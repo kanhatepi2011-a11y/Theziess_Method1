@@ -75,11 +75,31 @@ function cleanMethodMetadataText(value) {
   return text.slice(0, 256);
 }
 
-function normalizeExternalMethodName(result) {
-  // New checker versions return the actual metadata text in method_name.
-  // Never replace it with a hard-coded website name.
-  if (result?.method_detected === false) return null;
-  return cleanMethodMetadataText(result?.method_name);
+export function normalizeExternalMethodName(result) {
+  // Checker versions expose the extracted Artist/Method value under slightly
+  // different keys. Return only a value that was actually present in the
+  // video metadata; never replace a missing value with a hard-coded name.
+  const candidates = [
+    result?.method_name,
+    result?.method_value,
+    result?.method,
+    result?.artist_metadata,
+    result?.metadata_artist,
+    result?.artist,
+    result?.metadata?.method,
+    result?.metadata?.artist,
+    result?.tags?.artist,
+    result?.format_tags?.artist,
+    result?.format?.tags?.artist,
+    result?.ffprobe?.format?.tags?.artist,
+  ];
+
+  for (const candidate of candidates) {
+    const extracted = cleanMethodMetadataText(candidate);
+    if (extracted) return extracted;
+  }
+
+  return null;
 }
 
 function externalResultPayload(result, requestedUrl, oEmbed = null) {

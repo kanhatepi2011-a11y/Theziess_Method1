@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { extractTikTokDataFromHtml } from "../server/routes/tiktok/check.js";
+import {
+  extractTikTokDataFromHtml,
+  normalizeExternalMethodName,
+} from "../server/routes/tiktok/check.js";
 
 describe("TikTok video checker metadata parser", () => {
+  it("returns the exact Method/Artist value extracted by checker variants", () => {
+    expect(normalizeExternalMethodName({ method_name: "TheziessMethod.site" }))
+      .toBe("TheziessMethod.site");
+    expect(normalizeExternalMethodName({ format: { tags: { artist: "Actual Artist Tag" } } }))
+      .toBe("Actual Artist Tag");
+    expect(normalizeExternalMethodName({ method_detected: false }))
+      .toBeNull();
+  });
+
   it("extracts resolution, bitrate, fps, duration and size", () => {
     const state = {
       __DEFAULT_SCOPE__: {
@@ -74,4 +86,3 @@ describe("TikTok video checker metadata parser", () => {
   });
 
 });
-
