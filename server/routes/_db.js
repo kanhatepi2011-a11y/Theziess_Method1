@@ -1074,6 +1074,53 @@ export async function getAdminStats() {
   return result.rows[0];
 }
 
+export async function listAdminTopCompressors({ period = "7d", limit = 10 } = {}) {
+  await ensureSchema();
+
+  const normalizedPeriod = String(period || "7d").toLowerCase();
+  const periodMilliseconds = {
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+  }[normalizedPeriod];
+  const since = normalizedPeriod === "all"
+    ? null
+    : new Date(Date.now() - (periodMilliseconds || 7 * 24 * 60 * 60 * 1000));
+  const safeLimit = Math.min(20, Math.max(1, Math.trunc(Number(limit) || 10)));
+
+  const result = await pool.query(
+    `
+      SELECT
+        e.user_key,
+        COUNT(*)::INTEGER AS total_compressions,
+        COALESCE(SUM(e.input_bytes), 0)::TEXT AS total_input_bytes,
+        COALESCE(SUM(e.output_bytes), 0)::TEXT AS total_output_bytes,
+        MAX(e.created_at) AS last_compression_at,
+        u.telegram_id,
+        u.username,
+        u.first_name,
+        u.last_name
+      FROM ${COMPRESSION_EVENTS_TABLE} e
+      LEFT JOIN ${USERS_TABLE} u ON u.id::TEXT = e.user_key
+      WHERE ($1::TIMESTAMPTZ IS NULL OR e.created_at >= $1::TIMESTAMPTZ)
+      GROUP BY
+        e.user_key,
+        u.telegram_id,
+        u.username,
+        u.first_name,
+        u.last_name
+      ORDER BY
+        total_compressions DESC,
+        SUM(COALESCE(e.input_bytes, 0)) DESC,
+        last_compression_at DESC
+      LIMIT $2
+    `,
+    [since, safeLimit],
+  );
+
+  return result.rows;
+}
+
 export async function listAdminUsers({ page = 1, pageSize = 8 } = {}) {
   await ensureSchema();
 

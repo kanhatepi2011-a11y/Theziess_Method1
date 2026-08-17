@@ -14,6 +14,7 @@ import {
 const ADMIN_COMMANDS = [
   { command: "admin", description: "Open the admin dashboard" },
   { command: "stats", description: "Show platform statistics" },
+  { command: "topcompress", description: "Show top compression users" },
   { command: "users", description: "List registered users" },
   { command: "user", description: "Show one user's full information" },
   { command: "subscriptions", description: "Show active paid plans" },
@@ -22,6 +23,7 @@ const ADMIN_COMMANDS = [
   { command: "plans", description: "Show subscription assignment help" },
   { command: "trials", description: "Show active free trials" },
   { command: "payments", description: "Show recent payments" },
+  { command: "maintenance", description: "Control website maintenance" },
   { command: "id", description: "Show your Telegram ID" },
   { command: "ping", description: "Test whether the bot is online" },
   { command: "testwelcome", description: "Preview the group welcome message" },
@@ -61,7 +63,7 @@ function validateManualSetupKey(req) {
   return safeEqual(getProvidedSetupKey(req), configuredKey);
 }
 
-const BOT_CONFIGURATION_VERSION = "telegram-welcome-v12";
+const BOT_CONFIGURATION_VERSION = "telegram-admin-v13";
 
 function webhookVersion(secret, token, adminIds) {
   return crypto

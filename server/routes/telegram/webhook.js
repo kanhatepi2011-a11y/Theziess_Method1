@@ -120,6 +120,7 @@ function dashboardKeyboard() {
         { text: "📊 Stats", callback_data: "admin:stats" },
         { text: "👥 Users", callback_data: "admin:users:1" },
       ],
+      [{ text: "🏆 Top Compress", callback_data: "admin:topcompress:7d" }],
       [
         { text: "💎 Subscriptions", callback_data: "admin:subscriptions" },
         { text: "🆓 Trials", callback_data: "admin:trials" },
@@ -170,6 +171,73 @@ async function sendDashboard(chatId) {
 
   await sendTelegramMessage(chatId, message, {
     reply_markup: dashboardKeyboard(),
+  });
+}
+
+function topCompressKeyboard(activePeriod) {
+  const periods = ["24h", "7d", "30d", "all"];
+  return {
+    inline_keyboard: [
+      periods.map((period) => ({
+        text: `${period === activePeriod ? "✅ " : ""}${period.toUpperCase()}`,
+        callback_data: `admin:topcompress:${period}`,
+      })),
+      [{ text: "🏠 Admin", callback_data: "admin:home" }],
+    ],
+  };
+}
+
+function normalizeTopCompressPeriod(argument) {
+  const value = String(argument || "7d").trim().toLowerCase();
+  if (value === "today" || value === "day") return "24h";
+  if (["24h", "7d", "30d", "all"].includes(value)) return value;
+  return null;
+}
+
+async function sendTopCompressors(chatId, argument = "7d") {
+  const period = normalizeTopCompressPeriod(argument);
+  if (!period) {
+    await sendTelegramMessage(
+      chatId,
+      "Usage: <code>/topcompress 24h</code>, <code>/topcompress 7d</code>, <code>/topcompress 30d</code>, or <code>/topcompress all</code>.",
+    );
+    return;
+  }
+
+  const { listAdminTopCompressors } = await getDatabaseModule();
+  const users = await listAdminTopCompressors({ period, limit: 10 });
+  const labels = {
+    "24h": "Last 24 hours",
+    "7d": "Last 7 days",
+    "30d": "Last 30 days",
+    all: "All time",
+  };
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = [
+    "<b>🏆 Top Compress Users</b>",
+    `<i>${labels[period]} · ranked by completed compressions</i>`,
+    "",
+  ];
+
+  if (!users.length) {
+    lines.push("No compression activity was recorded for this period.");
+  } else {
+    for (const [index, user] of users.entries()) {
+      const rank = medals[index] || `${index + 1}.`;
+      const username = user.username
+        ? ` · @${escapeTelegramHtml(user.username)}`
+        : "";
+      lines.push(
+        `${rank} <b>${escapeTelegramHtml(userName(user))}</b>${username}`,
+        `   🎬 <b>${user.total_compressions}</b> · Input ${escapeTelegramHtml(formatBytes(user.total_input_bytes))} · Output ${escapeTelegramHtml(formatBytes(user.total_output_bytes))}`,
+        `   🕒 ${escapeTelegramHtml(formatDate(user.last_compression_at))}`,
+      );
+    }
+  }
+
+  lines.push("", `🕒 Updated: ${escapeTelegramHtml(formatDate(new Date()))}`);
+  await sendTelegramMessage(chatId, lines.join("\n"), {
+    reply_markup: topCompressKeyboard(period),
   });
 }
 
@@ -670,6 +738,8 @@ async function handleAdminAction(chatId, action, adminTelegramId) {
   if (action === "admin:subscriptions") return sendSubscriptions(chatId);
   if (action === "admin:trials") return sendTrials(chatId);
   if (action === "admin:payments") return sendPayments(chatId);
+  const topCompressMatch = /^admin:topcompress:(24h|7d|30d|all)$/.exec(action);
+  if (topCompressMatch) return sendTopCompressors(chatId, topCompressMatch[1]);
   if (action === "admin:grant:help") return sendGrantHelp(chatId);
   if (action === "admin:maintenance:status") {
     return handleMaintenanceCommand(chatId, "status", adminTelegramId);
@@ -769,7 +839,7 @@ async function handleMessage(message) {
     "testwelcome", "id", "whoami", "ping", "start", "help", "admin",
     "stats", "users", "user", "grant", "setplan", "addplan", "addsubscription",
     "revoke", "removeplan", "plans", "subscriptions", "trials", "payments",
-    "maintenance",
+    "maintenance", "topcompress", "topcompressors",
   ]);
 
   if (isGroupChat && command && !knownCommands.has(command)) {
@@ -892,6 +962,11 @@ async function handleMessage(message) {
 
   if (command === "payments") {
     await sendPayments(chatId);
+    return;
+  }
+
+  if (command === "topcompress" || command === "topcompressors") {
+    await sendTopCompressors(chatId, argument || "7d");
     return;
   }
 
