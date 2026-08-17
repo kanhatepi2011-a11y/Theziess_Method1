@@ -36,6 +36,126 @@ const LOCAL_STANDALONE_MODE = false;
 const TELEGRAM_USER_STORAGE_KEY = "theziess.telegram.user";
 const TELEGRAM_CONNECTED_AT_KEY = "theziess.telegram.connectedAt";
 const TELEGRAM_FALLBACK_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+const MAINTENANCE_STATUS_URL = "/api/maintenance/status";
+const MAINTENANCE_REQUEST_TIMEOUT_MS = 2500;
+const MAINTENANCE_POLL_INTERVAL_MS = 15_000;
+
+let maintenanceModeActive = false;
+let maintenancePollTimer = null;
+
+function formatMaintenanceTime(value) {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+
+    try {
+        return `Updated ${new Intl.DateTimeFormat("en-GB", {
+            dateStyle: "medium",
+            timeStyle: "short",
+            timeZone: "Asia/Phnom_Penh",
+        }).format(date)}`;
+    } catch {
+        return `Updated ${date.toLocaleString()}`;
+    }
+}
+
+function showMaintenanceMode(maintenance = {}) {
+    maintenanceModeActive = true;
+    const shell = document.getElementById("maintenanceShell");
+    const message = document.getElementById("maintenanceMessage");
+    const updatedAt = document.getElementById("maintenanceUpdatedAt");
+
+    document.documentElement.classList.add("maintenance-active");
+    if (shell) shell.hidden = false;
+    if (message) {
+        message.textContent = String(
+            maintenance.message
+            || "We are improving TheZiess Method. Please check back shortly.",
+        );
+    }
+
+    const formattedTime = formatMaintenanceTime(maintenance.updatedAt);
+    if (updatedAt) {
+        updatedAt.textContent = formattedTime;
+        updatedAt.hidden = !formattedTime;
+    }
+
+    if (window.__theziessAuthBootFailsafe) {
+        clearTimeout(window.__theziessAuthBootFailsafe);
+        window.__theziessAuthBootFailsafe = null;
+    }
+    document.documentElement.classList.remove("auth-booting");
+}
+
+async function fetchMaintenanceState() {
+    const controller = new AbortController();
+    const timer = window.setTimeout(
+        () => controller.abort(),
+        MAINTENANCE_REQUEST_TIMEOUT_MS,
+    );
+
+    try {
+        const response = await fetch(MAINTENANCE_STATUS_URL, {
+            method: "GET",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) return null;
+        return payload.maintenance || null;
+    } catch (error) {
+        if (error?.name !== "AbortError") {
+            console.warn("Unable to check maintenance status", error);
+        }
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function refreshMaintenanceMode() {
+    const maintenance = await fetchMaintenanceState();
+    if (!maintenance) return maintenanceModeActive;
+
+    if (maintenance.enabled) {
+        showMaintenanceMode(maintenance);
+        return true;
+    }
+
+    if (maintenanceModeActive) {
+        location.reload();
+    }
+    return false;
+}
+
+function startMaintenancePolling() {
+    if (maintenancePollTimer) return;
+    maintenancePollTimer = window.setInterval(
+        refreshMaintenanceMode,
+        MAINTENANCE_POLL_INTERVAL_MS,
+    );
+
+    document.getElementById("maintenanceCheckBtn")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        try {
+            await refreshMaintenanceMode();
+        } finally {
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+        }
+    });
+}
+
+async function initializeMaintenanceGate() {
+    startMaintenancePolling();
+    const maintenance = await fetchMaintenanceState();
+    if (!maintenance?.enabled) return false;
+    showMaintenanceMode(maintenance);
+    return true;
+}
 
 function readStoredTelegramUser() {
     try {
@@ -1567,7 +1687,9 @@ function initializeBottomNavigation() {
     setActiveNavigation("compress");
 }
 
-function initializeApp() {
+async function initializeApp() {
+    if (await initializeMaintenanceGate()) return;
+
     initializeMembership();
     autoConnectTelegramAdminBot();
     renderHistoryList();

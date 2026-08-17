@@ -125,3 +125,16 @@ CREATE INDEX IF NOT EXISTS theziess_tiktok_uploads_v1_user_created_idx
 
 CREATE INDEX IF NOT EXISTS theziess_tiktok_uploads_v1_user_status_idx
   ON theziess_tiktok_uploads_v1(user_key, status, updated_at DESC);
+
+-- Single-row website maintenance switch controlled by the admin Telegram bot.
+CREATE TABLE IF NOT EXISTS theziess_maintenance_state_v1 (
+  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  message TEXT NOT NULL DEFAULT 'We are improving TheZiess Method. Please check back shortly.',
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO theziess_maintenance_state_v1 (singleton)
+VALUES (TRUE)
+ON CONFLICT (singleton) DO NOTHING;

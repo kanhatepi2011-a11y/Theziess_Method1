@@ -37,6 +37,10 @@ const COMPRESSION_EVENTS_TABLE = "theziess_compression_events_v1";
 const DAILY_COMPRESSION_USAGE_TABLE = "theziess_daily_compression_usage_v1";
 const TIKTOK_CONNECTIONS_TABLE = "theziess_tiktok_connections_v1";
 const TIKTOK_UPLOADS_TABLE = "theziess_tiktok_uploads_v1";
+const MAINTENANCE_TABLE = "theziess_maintenance_state_v1";
+
+export const DEFAULT_MAINTENANCE_MESSAGE =
+  "We are improving TheZiess Method. Please check back shortly.";
 
 let schemaPromise;
 let userMigrationPromise;
@@ -285,6 +289,22 @@ export async function ensureSchema() {
       `);
 
       await pool.query(`
+        CREATE TABLE IF NOT EXISTS ${MAINTENANCE_TABLE} (
+          singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
+          enabled BOOLEAN NOT NULL DEFAULT FALSE,
+          message TEXT NOT NULL DEFAULT '${DEFAULT_MAINTENANCE_MESSAGE}',
+          updated_by TEXT,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        INSERT INTO ${MAINTENANCE_TABLE} (singleton)
+        VALUES (TRUE)
+        ON CONFLICT (singleton) DO NOTHING
+      `);
+
+      await pool.query(`
         CREATE INDEX IF NOT EXISTS theziess_subscriptions_v5_user_status_idx
           ON ${SUBSCRIPTIONS_TABLE}(user_key, status, expires_at DESC)
       `);
@@ -334,6 +354,66 @@ export async function ensureSchema() {
   }
 
   return schemaPromise;
+}
+
+function normalizeMaintenanceRow(row = {}) {
+  const rawDate = row.updated_at;
+  const updatedAt = rawDate instanceof Date
+    ? rawDate.toISOString()
+    : String(rawDate || "");
+
+  return {
+    enabled: Boolean(row.enabled),
+    message: String(row.message || DEFAULT_MAINTENANCE_MESSAGE),
+    updatedBy: row.updated_by ? String(row.updated_by) : null,
+    updatedAt: updatedAt || null,
+  };
+}
+
+export async function getMaintenanceState() {
+  await ensureSchema();
+  const result = await pool.query(`
+    SELECT enabled, message, updated_by, updated_at
+    FROM ${MAINTENANCE_TABLE}
+    WHERE singleton = TRUE
+    LIMIT 1
+  `);
+
+  return normalizeMaintenanceRow(result.rows[0]);
+}
+
+export async function setMaintenanceState({ enabled, message, updatedBy }) {
+  await ensureSchema();
+  const safeMessage = String(message || DEFAULT_MAINTENANCE_MESSAGE)
+    .replace(/\0/g, "")
+    .trim()
+    .slice(0, 500) || DEFAULT_MAINTENANCE_MESSAGE;
+  const safeUpdatedBy = String(updatedBy || "telegram-admin")
+    .replace(/\0/g, "")
+    .trim()
+    .slice(0, 100) || "telegram-admin";
+
+  const result = await pool.query(
+    `
+      INSERT INTO ${MAINTENANCE_TABLE} (
+        singleton,
+        enabled,
+        message,
+        updated_by,
+        updated_at
+      )
+      VALUES (TRUE, $1::BOOLEAN, $2::TEXT, $3::TEXT, NOW())
+      ON CONFLICT (singleton) DO UPDATE SET
+        enabled = EXCLUDED.enabled,
+        message = EXCLUDED.message,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+      RETURNING enabled, message, updated_by, updated_at
+    `,
+    [Boolean(enabled), safeMessage, safeUpdatedBy],
+  );
+
+  return normalizeMaintenanceRow(result.rows[0]);
 }
 
 export async function upsertTelegramUser(telegramUser) {

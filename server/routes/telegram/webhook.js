@@ -127,7 +127,10 @@ function dashboardKeyboard() {
       [
         { text: "🔄 Change Plan", callback_data: "admin:grant:help" },
       ],
-      [{ text: "💳 Payments", callback_data: "admin:payments" }],
+      [
+        { text: "💳 Payments", callback_data: "admin:payments" },
+        { text: "🛠 Maintenance", callback_data: "admin:maintenance:status" },
+      ],
     ],
   };
 }
@@ -568,6 +571,93 @@ async function sendPayments(chatId) {
   });
 }
 
+function maintenanceKeyboard(enabled) {
+  return {
+    inline_keyboard: [
+      [
+        enabled
+          ? { text: "✅ Keep ON", callback_data: "admin:maintenance:status" }
+          : { text: "🟠 Turn ON", callback_data: "admin:maintenance:on" },
+        enabled
+          ? { text: "🟢 Turn OFF", callback_data: "admin:maintenance:off" }
+          : { text: "✅ Keep OFF", callback_data: "admin:maintenance:status" },
+      ],
+      [{ text: "🏠 Admin", callback_data: "admin:home" }],
+    ],
+  };
+}
+
+async function sendMaintenanceState(chatId, maintenance, title = "Website maintenance") {
+  const enabled = Boolean(maintenance?.enabled);
+  const lines = [
+    `<b>🛠 ${escapeTelegramHtml(title)}</b>`,
+    "",
+    `Status: <b>${enabled ? "🟠 ON" : "🟢 OFF"}</b>`,
+    `Message: ${escapeTelegramHtml(maintenance?.message || "—")}`,
+    `Updated: ${escapeTelegramHtml(formatDate(maintenance?.updatedAt))}`,
+    "",
+    "Commands:",
+    "<code>/maintenance on</code>",
+    "<code>/maintenance on Your custom message</code>",
+    "<code>/maintenance off</code>",
+    "<code>/maintenance status</code>",
+  ];
+
+  await sendTelegramMessage(chatId, lines.join("\n"), {
+    reply_markup: maintenanceKeyboard(enabled),
+  });
+}
+
+async function handleMaintenanceCommand(chatId, argument, adminTelegramId) {
+  const [rawAction = "status", ...messageParts] = String(argument || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const action = rawAction.toLowerCase();
+
+  const { getMaintenanceState, setMaintenanceState } = await getDatabaseModule();
+
+  if (action === "status") {
+    await sendMaintenanceState(chatId, await getMaintenanceState());
+    return;
+  }
+
+  if (action !== "on" && action !== "off") {
+    await sendTelegramMessage(
+      chatId,
+      [
+        "⚠️ <b>Invalid maintenance command</b>",
+        "",
+        "Use <code>/maintenance on</code>, <code>/maintenance off</code>, or <code>/maintenance status</code>.",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const current = await getMaintenanceState();
+  const customMessage = messageParts.join(" ").replace(/\0/g, "").trim();
+
+  if (customMessage.length > 500) {
+    await sendTelegramMessage(
+      chatId,
+      "⚠️ Maintenance message must be 500 characters or fewer.",
+    );
+    return;
+  }
+
+  const maintenance = await setMaintenanceState({
+    enabled: action === "on",
+    message: customMessage || current.message,
+    updatedBy: `telegram:${adminTelegramId}`,
+  });
+
+  await sendMaintenanceState(
+    chatId,
+    maintenance,
+    action === "on" ? "Maintenance mode enabled" : "Maintenance mode disabled",
+  );
+}
+
 async function handleAdminAction(chatId, action, adminTelegramId) {
   if (action === "admin:home") return sendDashboard(chatId);
   if (action === "admin:stats") {
@@ -581,6 +671,15 @@ async function handleAdminAction(chatId, action, adminTelegramId) {
   if (action === "admin:trials") return sendTrials(chatId);
   if (action === "admin:payments") return sendPayments(chatId);
   if (action === "admin:grant:help") return sendGrantHelp(chatId);
+  if (action === "admin:maintenance:status") {
+    return handleMaintenanceCommand(chatId, "status", adminTelegramId);
+  }
+  if (action === "admin:maintenance:on") {
+    return handleMaintenanceCommand(chatId, "on", adminTelegramId);
+  }
+  if (action === "admin:maintenance:off") {
+    return handleMaintenanceCommand(chatId, "off", adminTelegramId);
+  }
 
   const usersMatch = /^admin:users:(\d+)$/.exec(action);
   if (usersMatch) return sendUsers(chatId, Number(usersMatch[1]));
@@ -670,6 +769,7 @@ async function handleMessage(message) {
     "testwelcome", "id", "whoami", "ping", "start", "help", "admin",
     "stats", "users", "user", "grant", "setplan", "addplan", "addsubscription",
     "revoke", "removeplan", "plans", "subscriptions", "trials", "payments",
+    "maintenance",
   ]);
 
   if (isGroupChat && command && !knownCommands.has(command)) {
@@ -792,6 +892,11 @@ async function handleMessage(message) {
 
   if (command === "payments") {
     await sendPayments(chatId);
+    return;
+  }
+
+  if (command === "maintenance") {
+    await handleMaintenanceCommand(chatId, argument, senderId);
     return;
   }
 
