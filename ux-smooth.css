@@ -1320,16 +1320,21 @@ textarea:focus-visible {
   box-shadow: 0 0 0 5px rgba(34, 211, 238, .08);
 }
 
-/* Keep the TikTok URL field clean and borderless in every interaction state. */
-.video-check-input-wrap,
-.video-check-input-wrap:hover,
-.video-check-input-wrap:focus-within {
-  border-color: transparent !important;
+/* Use one frame on the field wrapper; keep the inner input ring disabled. */
+.video-check-input-wrap {
+  border-color: rgba(103, 232, 249, .38) !important;
+  box-shadow: none !important;
+}
+
+.video-check-input-wrap:hover {
+  border-color: rgba(103, 232, 249, .54) !important;
   box-shadow: none !important;
 }
 
 .video-check-input-wrap:focus-within {
+  border-color: rgba(103, 232, 249, .72) !important;
   background: rgba(10, 4, 20, .82);
+  box-shadow: none !important;
 }
 
 .video-check-input-wrap input:focus,
