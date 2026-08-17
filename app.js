@@ -1575,7 +1575,9 @@ function setLogCopyVisible(_visible) {
 }
 
 function setProgress(percent) {
-    progressBar.style.width = `${percent}%`;
+    const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+    progressBar.style.setProperty("--progress-scale", String(safePercent / 100));
+    progressTrack.setAttribute("aria-valuenow", String(Math.round(safePercent)));
 }
 
 function showProgress() {
@@ -1831,7 +1833,10 @@ function cleanupTikTokUploadPreview() {
 function setTikTokUploadProgress({ percent = 0, uploaded = 0, total = 0, stage = "Ready" } = {}) {
     const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
     const bar = document.getElementById("tiktokUploadProgressBar");
-    if (bar) bar.style.width = `${safePercent}%`;
+    if (bar) {
+        bar.style.setProperty("--progress-scale", String(safePercent / 100));
+        bar.parentElement?.setAttribute("aria-valuenow", String(Math.round(safePercent)));
+    }
     setElementText("tiktokUploadPercent", `${Math.round(safePercent)}%`);
     setElementText("tiktokUploadBytes", `${formatFileSize(uploaded)} / ${formatFileSize(total)}`);
     setElementText("tiktokUploadStage", stage);
@@ -2345,6 +2350,7 @@ function renderFileList() {
         const checkboxInput = document.createElement("input");
         checkboxInput.type = "checkbox";
         checkboxInput.checked = item.checked;
+        checkboxInput.setAttribute("aria-label", `Select ${item.name}`);
         if (
             currentFlowState !== "completed" ||
             item.status !== "success" ||
@@ -2407,6 +2413,7 @@ function renderFileList() {
             uploadButton.title = item.tiktokUploadValidation?.valid
                 ? "Upload clean video to TikTok Inbox/Draft"
                 : "This video is not compatible with TikTok upload requirements";
+            uploadButton.setAttribute("aria-label", uploadButton.title);
             uploadButton.disabled = !item.tiktokUploadValidation?.valid;
             const uploadIcon = document.createElement("i");
             uploadIcon.className = "ri-tiktok-fill";
@@ -2426,7 +2433,10 @@ function renderFileList() {
 
         if (item.status === "pending" && currentFlowState !== "patching") {
             const removeBtn = document.createElement("button");
+            removeBtn.type = "button";
             removeBtn.className = "file-remove-btn";
+            removeBtn.title = `Remove ${item.name}`;
+            removeBtn.setAttribute("aria-label", removeBtn.title);
             const removeIcon = document.createElement("i");
             removeIcon.className = "ri-close-fill";
             removeBtn.appendChild(removeIcon);
@@ -3222,7 +3232,10 @@ async function renderHistoryList() {
         actions.className = "history-item-actions";
 
         const dlBtn = document.createElement("button");
+        dlBtn.type = "button";
         dlBtn.className = "history-btn";
+        dlBtn.title = `Download ${record.name}`;
+        dlBtn.setAttribute("aria-label", dlBtn.title);
         const dlIcon = document.createElement("i");
         dlIcon.className = "ri-download-fill";
         dlBtn.appendChild(dlIcon);
@@ -3235,7 +3248,10 @@ async function renderHistoryList() {
         });
 
         const delBtn = document.createElement("button");
+        delBtn.type = "button";
         delBtn.className = "history-btn history-btn-delete";
+        delBtn.title = `Delete ${record.name} from history`;
+        delBtn.setAttribute("aria-label", delBtn.title);
         const delIcon = document.createElement("i");
         delIcon.className = "ri-delete-bin-fill";
         delBtn.appendChild(delIcon);
@@ -3245,10 +3261,12 @@ async function renderHistoryList() {
         });
 
         const uploadBtn = document.createElement("button");
+        uploadBtn.type = "button";
         uploadBtn.className = "history-btn history-btn-tiktok";
         uploadBtn.title = record.tiktokBlob && record.tiktokValidation?.valid
             ? "Upload this clean artifact to TikTok Inbox/Draft"
             : "Process this video again to create a valid clean TikTok artifact";
+        uploadBtn.setAttribute("aria-label", uploadBtn.title);
         uploadBtn.disabled = !(record.tiktokBlob && record.tiktokValidation?.valid);
         const uploadIcon = document.createElement("i");
         uploadIcon.className = "ri-tiktok-fill";

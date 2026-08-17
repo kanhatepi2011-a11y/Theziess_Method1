@@ -5,7 +5,7 @@
 
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
   >
 
   <title>
@@ -42,6 +42,12 @@
   >
 
   <link
+    rel="preload"
+    as="image"
+    href="logo.png"
+  >
+
+  <link
     rel="stylesheet"
     href="style.css?v=20260807-telegram-ui-v2"
   >
@@ -53,7 +59,7 @@
 
   <link
     rel="stylesheet"
-    href="ux-smooth.css?v=20260816-auth-layout-fix"
+    href="ux-smooth.css?v=20260817-premium-fluid-v3"
   >
 
   <script>
@@ -72,24 +78,59 @@
   </script>
 
   <style>
-    /* Prevent the logged-out placeholder UI from flashing before the
-       Telegram session and FREE-plan quota have finished hydrating. */
+    /* Keep the final layout reserved while Telegram/session data hydrates. */
     html {
       background: #07030f;
     }
 
-    html.auth-booting body {
-      opacity: 0 !important;
+    html.auth-booting .page,
+    html.auth-booting .app-bottom-nav,
+    html.auth-booting .footer {
+      opacity: 0;
+      visibility: hidden;
       pointer-events: none !important;
     }
 
-    body {
+    .page,
+    .app-bottom-nav,
+    .footer {
       opacity: 1;
-      transition: opacity 120ms ease-out;
+      visibility: visible;
+      transition:
+        opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        visibility 180ms linear;
+    }
+
+    .app-boot-shell {
+      position: fixed;
+      inset: 0;
+      z-index: 12000;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 34%, rgba(139, 92, 246, 0.18), transparent 28%),
+        radial-gradient(circle at 60% 62%, rgba(34, 211, 238, 0.07), transparent 30%),
+        #07030f;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition:
+        opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        visibility 180ms linear;
+    }
+
+    html.auth-booting .app-boot-shell {
+      opacity: 1;
+      visibility: visible;
     }
 
     @media (prefers-reduced-motion: reduce) {
-      body {
+      .page,
+      .app-bottom-nav,
+      .footer,
+      .app-boot-shell {
         transition: none;
       }
     }
@@ -132,6 +173,17 @@
     }, 3000);
   </script>
 
+  <div class="app-boot-shell" role="status" aria-live="polite" aria-label="Loading TheZiess Method">
+    <div class="app-boot-card">
+      <img src="logo.png" width="72" height="72" alt="" aria-hidden="true">
+      <div class="app-boot-copy">
+        <strong>TheZiess Method</strong>
+        <span>កំពុងរៀបចំ workspace របស់អ្នក…</span>
+      </div>
+      <span class="app-boot-progress" aria-hidden="true"><span></span></span>
+    </div>
+  </div>
+
   <div class="page">
     <header class="panel panel-header">
       <div class="header">
@@ -139,7 +191,10 @@
           <img
             class="brand-logo"
             src="logo.png"
+            width="64"
+            height="64"
             alt="TheZiess Method logo"
+            decoding="async"
           >
 
           <div class="brand-copy">
@@ -176,7 +231,10 @@
             <img
               class="telegram-account-photo"
               id="telegramAccountPhoto"
+              width="43"
+              height="43"
               alt="Telegram profile photo"
+              decoding="async"
               hidden
             >
 
@@ -303,6 +361,7 @@
               aria-label="Video processing progress"
               aria-valuemin="0"
               aria-valuemax="100"
+              aria-valuenow="0"
             >
               <div
                 class="progress-bar"
@@ -1292,7 +1351,14 @@
             <strong id="tiktokUploadStage">Ready</strong>
             <span id="tiktokUploadPercent">0%</span>
           </div>
-          <div class="tiktok-upload-progress-track"><div id="tiktokUploadProgressBar"></div></div>
+        <div
+          class="tiktok-upload-progress-track"
+          role="progressbar"
+          aria-label="TikTok upload progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        ><div id="tiktokUploadProgressBar"></div></div>
           <small id="tiktokUploadBytes">0 KB / 0 KB</small>
         </section>
 
@@ -1443,7 +1509,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260816-auth-layout-fix"
+    src="app.js?v=20260817-premium-fluid-v3"
   ></script>
 </body>
 </html>

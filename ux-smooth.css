@@ -1084,3 +1084,929 @@ body[data-app-view="check"] .panel-video-check:not([hidden]) {
     min-height: 66px;
   }
 }
+
+/* =========================================================
+   THEZIESS METHOD — PREMIUM FLUID UX V3 · 2026-08-17
+   Final visual layer. Existing IDs, routes and business logic
+   remain untouched; this layer stabilizes and polishes them.
+   ========================================================= */
+
+:root {
+  --ux-bg-0: #05010b;
+  --ux-bg-1: #090315;
+  --ux-surface-1: rgba(17, 7, 33, .82);
+  --ux-surface-2: rgba(24, 10, 45, .90);
+  --ux-surface-3: rgba(255, 255, 255, .045);
+  --ux-text-1: #fbf9ff;
+  --ux-text-2: #c8bdd7;
+  --ux-text-3: #978aa8;
+  --ux-purple: #9b5cf6;
+  --ux-cyan: #42d9ef;
+  --ux-success: #55d6a2;
+  --ux-danger: #fb7185;
+  --ux-focus: rgba(103, 232, 249, .85);
+  --ux-border: rgba(216, 180, 254, .16);
+  --ux-border-strong: rgba(192, 132, 252, .34);
+  --ux-radius-sm: 12px;
+  --ux-radius-md: 17px;
+  --ux-radius-lg: 23px;
+  --ux-radius-xl: 28px;
+  --ux-space-1: 4px;
+  --ux-space-2: 8px;
+  --ux-space-3: 12px;
+  --ux-space-4: 16px;
+  --ux-space-5: 20px;
+  --ux-space-6: 24px;
+  --ux-ease-premium: cubic-bezier(.22, 1, .36, 1);
+  --ux-transition-fast: 150ms var(--ux-ease-premium);
+  --ux-transition-normal: 240ms var(--ux-ease-premium);
+  --ux-shadow-card: 0 20px 54px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .035);
+  --ux-shadow-float: 0 28px 88px rgba(0, 0, 0, .58), 0 0 42px rgba(124, 58, 237, .11);
+}
+
+html {
+  min-width: 320px;
+  scrollbar-gutter: stable;
+  scroll-padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+}
+
+body {
+  isolation: isolate;
+  min-width: 320px;
+  min-height: 100svh;
+  color: var(--ux-text-1);
+  font-synthesis: none;
+}
+
+body::before {
+  opacity: .72;
+}
+
+::selection {
+  color: #fff;
+  background: rgba(139, 92, 246, .58);
+}
+
+/* Stable first paint */
+.app-boot-card {
+  width: min(100%, 370px);
+  min-height: 186px;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid rgba(216, 180, 254, .18);
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(27, 11, 49, .90), rgba(8, 3, 18, .92));
+  box-shadow: var(--ux-shadow-float), inset 0 1px 0 rgba(255, 255, 255, .05);
+  backdrop-filter: blur(16px) saturate(130%);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+}
+
+.app-boot-card > img {
+  width: 72px;
+  height: 72px;
+  border: 1px solid rgba(216, 180, 254, .28);
+  border-radius: 20px;
+  background: #07020f;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .38), 0 0 24px rgba(139, 92, 246, .16);
+}
+
+.app-boot-copy {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.app-boot-copy strong {
+  overflow: hidden;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-boot-copy span {
+  color: var(--ux-text-2);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.app-boot-progress {
+  grid-column: 1 / -1;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .055);
+}
+
+.app-boot-progress > span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ux-purple), #c084fc, var(--ux-cyan));
+  box-shadow: 0 0 16px rgba(66, 217, 239, .24);
+  transform: translate3d(-130%, 0, 0);
+  animation: ux-boot-progress 1.15s var(--ux-ease-premium) infinite;
+}
+
+@keyframes ux-boot-progress {
+  to { transform: translate3d(340%, 0, 0); }
+}
+
+/* Premium surfaces */
+.panel,
+.queue-and-actions-wrapper,
+.history-container,
+.video-check-preview,
+.video-check-metric,
+.profile-hero-card,
+.profile-information-item,
+.profile-subscription-card,
+.profile-tiktok-card,
+.profile-plans-panel {
+  border-color: var(--ux-border);
+  box-shadow: var(--ux-shadow-card);
+}
+
+.panel {
+  background:
+    linear-gradient(145deg, rgba(27, 11, 49, .83), rgba(8, 3, 18, .88)),
+    var(--ux-surface-1);
+}
+
+.panel::before {
+  opacity: .55;
+}
+
+.panel-header {
+  min-height: 106px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(139, 92, 246, .14), transparent 28%),
+    radial-gradient(circle at 92% 115%, rgba(34, 211, 238, .07), transparent 32%),
+    linear-gradient(145deg, rgba(27, 11, 49, .88), rgba(8, 3, 18, .90));
+}
+
+.brand-logo {
+  flex: 0 0 auto;
+  aspect-ratio: 1;
+}
+
+.header-title,
+.drop-text-primary,
+.video-check-heading h2,
+.tutorial-page-header h2 {
+  text-wrap: balance;
+}
+
+.header-subtitle,
+.subscription-heading p,
+.profile-subscription-card p,
+.video-check-note,
+.tutorial-card-heading p {
+  text-wrap: pretty;
+}
+
+.header-account-area {
+  display: grid;
+  align-items: stretch;
+}
+
+.header-login-button,
+.telegram-account-card {
+  grid-area: 1 / 1;
+  width: 100%;
+}
+
+.telegram-account-details {
+  min-width: 0;
+}
+
+.telegram-account-details strong,
+.telegram-account-details span,
+.telegram-account-details small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Form controls and action feedback */
+button,
+[role="button"],
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+[role="button"],
+a {
+  transition-timing-function: var(--ux-ease-premium);
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--ux-focus) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(34, 211, 238, .08);
+}
+
+button[aria-busy="true"] {
+  cursor: progress;
+  pointer-events: none;
+}
+
+button:disabled,
+.btn:disabled,
+.modal-btn:disabled {
+  cursor: not-allowed;
+  filter: saturate(.48);
+}
+
+.btn,
+.btn-tiktok,
+.modal-btn,
+.video-check-submit,
+.header-login-button,
+.profile-plans-inline-button,
+.subscription-close-btn,
+.telegram-account-logout {
+  backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
+}
+
+.btn:hover:not(:disabled),
+.btn-tiktok:hover:not(:disabled),
+.modal-btn:hover:not(:disabled),
+.video-check-submit:hover:not(:disabled),
+.header-login-button:hover:not(:disabled) {
+  filter: brightness(1.055);
+}
+
+.btn:active:not(:disabled),
+.btn-tiktok:active:not(:disabled),
+.modal-btn:active:not(:disabled),
+.video-check-submit:active:not(:disabled),
+.header-login-button:active:not(:disabled) {
+  transform: translate3d(0, 0, 0) scale(.975);
+  transition-duration: 90ms;
+}
+
+/* Upload and queue stability */
+.drop-zone {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.drop-zone::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(120deg, transparent 15%, rgba(255, 255, 255, .035) 45%, transparent 74%);
+  opacity: 0;
+  transform: translate3d(-18%, 0, 0);
+  transition: opacity var(--ux-transition-normal), transform 420ms var(--ux-ease-premium);
+}
+
+.drop-zone:hover::before,
+.drop-zone:focus-visible::before,
+.drop-zone.drag-over::before {
+  opacity: 1;
+  transform: translate3d(12%, 0, 0);
+}
+
+.file-item,
+.history-item {
+  contain: paint;
+}
+
+.file-item-right,
+.history-item-actions {
+  min-width: fit-content;
+}
+
+.file-remove-btn,
+.history-btn,
+.history-toggle-btn,
+.btn-clear-history,
+.video-check-paste,
+.subscription-close-btn,
+.modal-close-btn,
+.telegram-account-logout {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.file-item-progress,
+.progress-track,
+.tiktok-upload-progress-track {
+  transform: translateZ(0);
+}
+
+.progress-bar,
+.tiktok-upload-progress-track > div {
+  width: 100%;
+  transform: scaleX(var(--progress-scale, 0));
+  transform-origin: left center;
+  transition: transform 220ms var(--ux-ease-premium);
+  will-change: transform;
+}
+
+.progress-bar.indeterminate {
+  transform: scaleX(1);
+}
+
+.file-item-progress-bar {
+  width: 100%;
+  left: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 240ms var(--ux-ease-premium), background-color var(--ux-transition-fast);
+}
+
+.file-item.status-success .file-item-progress-bar,
+.file-item.status-error .file-item-progress-bar {
+  width: 100%;
+  transform: scaleX(1);
+}
+
+.file-item.status-processing .file-item-progress-bar {
+  width: 38%;
+  left: 0;
+  transform: translate3d(-120%, 0, 0);
+  animation: ux-file-progress 1.05s var(--ux-ease-premium) infinite;
+}
+
+@keyframes ux-file-progress {
+  to { transform: translate3d(365%, 0, 0); }
+}
+
+.file-badge,
+.history-badge,
+.subscription-status,
+.profile-plan-badge,
+.plan-chip,
+.plan-tier-badge {
+  white-space: nowrap;
+}
+
+/* Video inspector */
+.video-check-form,
+.video-check-result,
+.video-check-status {
+  min-width: 0;
+}
+
+.video-check-result:not([hidden]),
+.tiktok-upload-progress:not([hidden]),
+.tiktok-upload-error:not([hidden]),
+.tiktok-upload-success:not([hidden]) {
+  animation: ux-state-enter 240ms var(--ux-ease-premium) both;
+}
+
+@keyframes ux-state-enter {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+.video-check-submit[aria-busy="true"] {
+  min-width: 138px;
+}
+
+/* Profile and plans */
+.profile-modal-body {
+  scrollbar-gutter: stable;
+}
+
+.profile-avatar-shell,
+.profile-avatar-image,
+.profile-avatar-initials {
+  aspect-ratio: 1;
+}
+
+.profile-hero-card,
+.profile-information-item,
+.profile-subscription-card,
+.profile-tiktok-card {
+  background-color: rgba(255, 255, 255, .022);
+}
+
+.profile-plans-panel .plan-grid {
+  grid-auto-rows: 1fr;
+}
+
+.profile-plans-panel .plan-card,
+.profile-plans-panel .plan-card.admin-only {
+  min-width: 0;
+  min-height: 118px;
+  justify-content: flex-end;
+  border-style: solid;
+  transition:
+    transform var(--ux-transition-normal),
+    border-color var(--ux-transition-normal),
+    background var(--ux-transition-normal),
+    box-shadow var(--ux-transition-normal),
+    filter var(--ux-transition-fast);
+}
+
+.profile-plans-panel .plan-card:hover:not(:disabled) {
+  transform: translate3d(0, -2px, 0);
+}
+
+.profile-plans-panel .plan-card:active:not(:disabled) {
+  transform: scale(.982);
+}
+
+.profile-plans-panel .plan-featured {
+  border-color: rgba(250, 204, 21, .36);
+  background:
+    radial-gradient(circle at 88% 10%, rgba(250, 204, 21, .09), transparent 34%),
+    linear-gradient(145deg, rgba(37, 20, 58, .98), rgba(13, 8, 27, .98));
+}
+
+.profile-plans-panel .plan-card.current {
+  border-color: rgba(85, 214, 162, .58);
+  box-shadow: 0 0 0 1px rgba(85, 214, 162, .10), 0 14px 32px rgba(0, 0, 0, .22);
+}
+
+.profile-plans-panel .plan-card.current::after {
+  content: "CURRENT";
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  color: var(--ux-success);
+  font: 800 7px "JetBrains Mono", monospace;
+  letter-spacing: .08em;
+}
+
+/* Modal motion: transitions also animate the closing state. */
+.modal-overlay {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 220ms var(--ux-ease-premium), visibility 220ms linear;
+}
+
+.modal-overlay:not(.tutorial-page-overlay) {
+  padding: max(14px, env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+}
+
+.tutorial-page-overlay {
+  padding: max(20px, env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) calc(110px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+}
+
+.modal-overlay.active {
+  visibility: visible;
+  opacity: 1;
+}
+
+.modal-card,
+.tutorial-page {
+  opacity: 0;
+  transform: translate3d(0, 10px, 0) scale(.985);
+  transition: opacity 220ms var(--ux-ease-premium), transform 260ms var(--ux-ease-premium);
+}
+
+.modal-overlay.active .modal-card,
+.modal-overlay.active .tutorial-page {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  animation: none;
+}
+
+.modal-card,
+.profile-modal-card,
+.payment-modal-card,
+.tiktok-upload-modal-card {
+  max-height: calc(100dvh - 28px);
+  overflow: hidden;
+  box-shadow: var(--ux-shadow-float), inset 0 1px 0 rgba(255, 255, 255, .045);
+}
+
+.modal-body,
+.profile-modal-body,
+.tiktok-upload-body {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.profile-modal-body,
+.tiktok-upload-body {
+  overflow-y: auto;
+}
+
+.modal-actions {
+  flex: 0 0 auto;
+  background: rgba(8, 3, 18, .78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Bottom navigation */
+.app-bottom-nav {
+  isolation: isolate;
+  padding-bottom: max(7px, env(safe-area-inset-bottom, 0px));
+}
+
+.app-nav-button {
+  position: relative;
+  overflow: visible;
+}
+
+.app-nav-button::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  background: #fff;
+  opacity: 0;
+  transform: translate3d(-50%, 4px, 0) scaleX(.35);
+  transition: opacity var(--ux-transition-normal), transform var(--ux-transition-normal);
+}
+
+.app-nav-button.active::after {
+  opacity: .78;
+  transform: translate3d(-50%, 0, 0) scaleX(1);
+}
+
+.app-nav-count,
+.app-nav-online-dot {
+  z-index: 2;
+}
+
+/* Desktop has deliberate whitespace rather than stretched mobile cards. */
+@media (min-width: 960px) {
+  .page {
+    width: min(100%, 1120px);
+    max-width: 1120px;
+  }
+
+  .panel-header .header {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  }
+
+  .drop-zone {
+    min-height: 330px;
+  }
+
+  .profile-modal-card {
+    width: min(600px, calc(100vw - 48px));
+  }
+}
+
+@media (max-width: 780px) {
+  body {
+    background-attachment: scroll;
+  }
+
+  .panel-header {
+    min-height: 0;
+  }
+
+  .modal-overlay {
+    backdrop-filter: blur(9px);
+    -webkit-backdrop-filter: blur(9px);
+  }
+}
+
+@media (max-width: 700px) {
+  body {
+    padding: 10px 10px calc(88px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .page,
+  .container {
+    width: 100%;
+    max-width: 100%;
+    gap: 12px;
+  }
+
+  .panel {
+    width: 100%;
+    gap: 13px;
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .panel-header {
+    padding: 14px;
+  }
+
+  .panel-header .header {
+    gap: 12px;
+  }
+
+  .brand-wrap {
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 11px;
+  }
+
+  .brand-logo {
+    width: 54px;
+    height: 54px;
+    padding: 4px;
+    border-radius: 15px;
+  }
+
+  .header-title {
+    font-size: clamp(22px, 6.4vw, 29px);
+    line-height: 1.08;
+    letter-spacing: .03em;
+  }
+
+  .header-subtitle {
+    margin-top: 5px;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+
+  .header-login-button,
+  .telegram-account-card {
+    min-height: 58px;
+    border-radius: 16px;
+  }
+
+  .telegram-account-photo {
+    width: 42px;
+    height: 42px;
+  }
+
+  .panel-right,
+  .panel-log,
+  .panel-video-check {
+    padding: 12px;
+  }
+
+  .drop-zone {
+    min-height: 240px;
+    gap: 13px;
+    padding: 24px 12px;
+    border-radius: 20px;
+  }
+
+  .brutalist-upload-box {
+    width: 70px;
+    height: 70px;
+    border-radius: 20px;
+    font-size: 31px;
+  }
+
+  .drop-text-primary {
+    font-size: 19px;
+  }
+
+  .drop-text-secondary {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .queue-and-actions-wrapper {
+    gap: 11px;
+    padding: 13px;
+    border-radius: 18px;
+  }
+
+  .btn,
+  .btn-tiktok {
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 12px;
+  }
+
+  .status-log,
+  .panel-log .status-log {
+    min-height: 105px;
+    max-height: 190px;
+    border-radius: 13px;
+  }
+
+  .app-bottom-nav {
+    width: calc(100% - 18px);
+    min-height: 64px;
+    bottom: max(7px, env(safe-area-inset-bottom, 0px));
+    gap: 2px;
+    padding: 5px;
+    border-radius: 19px;
+  }
+
+  .app-nav-button {
+    min-height: 52px;
+    padding: 5px 3px;
+    border-radius: 13px;
+    font-size: 9px;
+    line-height: 1.1;
+  }
+
+  .app-nav-icon,
+  .app-nav-button > i {
+    font-size: 19px;
+  }
+}
+
+@media (max-width: 560px) {
+  html {
+    scroll-padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-boot-card {
+    min-height: 164px;
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 13px;
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .app-boot-card > img {
+    width: 58px;
+    height: 58px;
+    border-radius: 17px;
+  }
+
+  .app-boot-copy strong {
+    font-size: 17px;
+  }
+
+  .file-item-right {
+    gap: 5px;
+  }
+
+  .file-remove-btn,
+  .history-btn,
+  .history-toggle-btn,
+  .btn-clear-history,
+  .video-check-paste,
+  .subscription-close-btn,
+  .modal-close-btn,
+  .telegram-account-logout {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .modal-overlay:not(.tutorial-page-overlay) {
+    align-items: flex-end;
+    padding: 8px max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  }
+
+  .tutorial-page-overlay {
+    align-items: flex-start;
+    padding: 0 0 calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .modal-card,
+  .profile-modal-card,
+  .payment-modal-card,
+  .tiktok-upload-modal-card {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+    border-radius: 22px;
+  }
+
+  .profile-modal-body,
+  .tiktok-upload-body {
+    max-height: none;
+  }
+
+  .profile-information-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-information-item {
+    min-height: 76px;
+  }
+
+  .profile-modal-actions,
+  .tiktok-upload-actions {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-nav-button::after {
+    bottom: 3px;
+  }
+}
+
+@media (max-width: 430px) {
+  .header-title {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .telegram-account-details strong {
+    font-size: 13px;
+  }
+
+  .file-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .file-item-right {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .profile-plans-panel .plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-plans-panel .plan-card,
+  .profile-plans-panel .plan-card.admin-only {
+    min-height: 108px;
+  }
+
+  .tiktok-upload-preview {
+    max-height: 310px;
+  }
+}
+
+@media (max-width: 360px) {
+  .profile-information-grid,
+  .profile-subscription-details,
+  .profile-tiktok-actions,
+  .tiktok-upload-metadata,
+  .tiktok-upload-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-subscription-heading {
+    flex-direction: column;
+  }
+
+  .app-nav-button {
+    letter-spacing: -.015em;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .drop-zone::before {
+    display: none;
+  }
+
+  .profile-plans-panel .plan-card:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .panel,
+  .app-bottom-nav,
+  .modal-actions,
+  .app-boot-card {
+    background-color: rgba(10, 4, 22, .97);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .panel,
+  .app-bottom-nav,
+  .modal-card,
+  .tutorial-page,
+  .app-boot-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: #0c0518;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-boot-progress > span,
+  .file-item.status-processing .file-item-progress-bar,
+  .video-check-result:not([hidden]),
+  .tiktok-upload-progress:not([hidden]),
+  .tiktok-upload-error:not([hidden]),
+  .tiktok-upload-success:not([hidden]) {
+    animation: none !important;
+  }
+
+  .progress-bar,
+  .tiktok-upload-progress-track > div,
+  .modal-overlay,
+  .modal-card,
+  .tutorial-page,
+  .app-nav-button::after,
+  .drop-zone::before {
+    transition-duration: .01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .panel,
+  .drop-zone,
+  .queue-and-actions-wrapper,
+  .modal-card,
+  .app-bottom-nav,
+  .plan-card {
+    border: 1px solid CanvasText;
+  }
+}
