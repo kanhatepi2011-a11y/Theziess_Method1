@@ -1,585 +1,1349 @@
-// Audio-inflation MP4 patcher — v2.6 browser/Web Worker port.
-// The MP4 transformation mirrors the supplied v2.6 Node.js script:
-// - inflate audio stsz/stsc/stco/stts
-// - give appended samples a tiny duration
-// - update mdhd and mvhd duration fields without corrupting their headers
-// - remove audio edts during rebuild
-// - support stco and co64 chunk-offset tables on both video and audio tracks
-// - preserve existing co64 and auto-promote stco to co64 on 32-bit overflow
-// - no FFmpeg, transcoding, resize, FPS conversion, or recompression
+/**
+ * Theziess Universal MP4/MOV Audio-Inflation Patcher — Browser/Web Worker v3.1.0
+ * Production browser core used by TheziessMethod website.
+ *
+ * - Generic non-fragmented ISO BMFF parser
+ * - stco + co64 with BigInt and automatic stco -> co64 promotion
+ * - multiple mdat relocation map; preserves top-level order
+ * - preserves durations, edts/elst, encoded packets and unknown atoms
+ * - stsz + stz2 support for selected audio
+ * - updates chunk-offset tables for every track
+ * - embeds/replaces ©cmt = theziessmethod.site while preserving unrelated metadata
+ * - zero-filled fake audio payload; no FFmpeg/transcoding in the browser path
+ */
 
-const ri = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+const VERSION = "3.1.0";
+const METHOD = "theziessmethod.site";
+const UINT32_MAX = 0xFFFFFFFFn;
+const UINT64_MAX = 0xFFFFFFFFFFFFFFFFn;
+const MAX_SAFE_BIG = BigInt(Number.MAX_SAFE_INTEGER);
+const DEFAULT_FACTOR = 8;
+const DEFAULT_FAKE_SIZE = 8;
+const MAX_STABILIZATION_PASSES = 32;
+const STRUCTURAL_CONTAINERS = new Set([
+    "moov", "trak", "mdia", "minf", "stbl", "edts", "dinf", "mvex",
+]);
 
-// Only descend into the structural containers required by this patcher.
-// Camera apps frequently store vendor/private metadata inside udta/meta/ilst.
-// Treating those payloads as generic child-box streams can throw `Bad box size`
-// even though the actual video is perfectly playable. Keep optional metadata
-// containers opaque so their bytes are preserved exactly.
-const CONTAINERS = new Set(["moov", "trak", "mdia", "minf", "stbl"]);
-
-function dv(bytes) {
-    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-}
-
-function readU32(bytes, offset) {
-    return dv(bytes).getUint32(offset, false);
-}
-
-function writeU32(bytes, offset, value) {
-    dv(bytes).setUint32(offset, Number(value) >>> 0, false);
-}
-
-function readU64(bytes, offset) {
-    const value = dv(bytes).getBigUint64(offset, false);
-    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error(
-            "MP4 chunk offset exceeds JavaScript safe integer range",
-        );
+// Small Uint8Array subclass providing only the Buffer-style helpers required
+// internally by this parser. This is browser-safe: no Node.js fs/path/process
+// and no external polyfill dependency.
+class BrowserBuffer extends Uint8Array {
+    static allocUnsafe(size) {
+        if (!Number.isSafeInteger(size) || size < 0) throw new RangeError(`Invalid allocation size: ${size}`);
+        return new BrowserBuffer(size);
     }
-    return Number(value);
-}
-
-function writeU64(bytes, offset, value) {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new Error("Invalid 64-bit MP4 chunk offset");
+    static alloc(size, fill = 0) {
+        const out = BrowserBuffer.allocUnsafe(size);
+        out.fill(fill);
+        return out;
     }
-    dv(bytes).setBigUint64(offset, BigInt(value), false);
-}
-
-function readType(bytes, offset) {
-    return String.fromCharCode(
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    );
-}
-
-function writeType(bytes, offset, type) {
-    for (let i = 0; i < 4; i++) {
-        bytes[offset + i] = type.charCodeAt(i) & 0xff;
-    }
-}
-
-function sliceBytes(bytes, start, end) {
-    // Buffer.slice() in the local script returns a view, but the final Buffer.concat()
-    // copies it. Uint8Array.slice() gives the same resulting bytes for this port.
-    return bytes.slice(start, end);
-}
-
-function readBox(bytes, o, end) {
-    if (o + 8 > end) throw new Error(`Truncated box header @${o}`);
-
-    let size = readU32(bytes, o);
-    const type = readType(bytes, o + 4);
-    let hs = 8;
-
-    if (size === 1) {
-        if (o + 16 > end)
-            throw new Error(`Truncated extended box header @${o}`);
-        const hi = readU32(bytes, o + 8);
-        const lo = readU32(bytes, o + 12);
-        const largeSize = BigInt(hi) * 0x100000000n + BigInt(lo);
-        if (largeSize > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error(
-                `MP4 box '${type}' is too large for browser processing`,
-            );
+    static from(value, encoding = "utf8") {
+        if (typeof value === "string") {
+            if (encoding === "latin1" || encoding === "binary") {
+                const out = new BrowserBuffer(value.length);
+                for (let i = 0; i < value.length; i++) out[i] = value.charCodeAt(i) & 0xff;
+                return out;
+            }
+            return BrowserBuffer.from(new TextEncoder().encode(value));
         }
-        size = Number(largeSize);
-        hs = 16;
-    } else if (size === 0) {
-        size = end - o;
+        if (value instanceof ArrayBuffer) {
+            const view = new Uint8Array(value);
+            const out = new BrowserBuffer(view.length);
+            out.set(view);
+            return out;
+        }
+        if (ArrayBuffer.isView(value) || Array.isArray(value)) {
+            const view = value instanceof Uint8Array ? value : new Uint8Array(value.buffer || value);
+            const out = new BrowserBuffer(view.byteLength);
+            out.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+            return out;
+        }
+        throw new TypeError("Unsupported BrowserBuffer.from input");
     }
-
-    if (size < hs || o + size > end) {
-        throw new Error(`Bad box size for '${type}' @${o}: ${size}`);
+    static concat(parts) {
+        let total = 0;
+        for (const part of parts) total += part.byteLength;
+        const out = new BrowserBuffer(total);
+        let cursor = 0;
+        for (const part of parts) {
+            out.set(part, cursor);
+            cursor += part.byteLength;
+        }
+        return out;
     }
+    static isBuffer(value) { return value instanceof BrowserBuffer; }
+    readUInt32BE(offset) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getUint32(offset, false); }
+    readUInt16BE(offset) { return new DataView(this.buffer, this.byteOffset, this.byteLength).getUint16(offset, false); }
+    writeUInt32BE(value, offset) {
+        new DataView(this.buffer, this.byteOffset, this.byteLength).setUint32(offset, Number(value), false);
+        return offset + 4;
+    }
+    copy(target, targetStart = 0, sourceStart = 0, sourceEnd = this.byteLength) {
+        const slice = this.subarray(sourceStart, sourceEnd);
+        target.set(slice, targetStart);
+        return slice.byteLength;
+    }
+    equals(other) {
+        if (!(other instanceof Uint8Array) || other.byteLength !== this.byteLength) return false;
+        for (let i = 0; i < this.byteLength; i++) if (this[i] !== other[i]) return false;
+        return true;
+    }
+    write(text, offset = 0, length = undefined, encoding = "utf8") {
+        const src = BrowserBuffer.from(text, encoding);
+        const count = Math.min(length ?? src.byteLength, src.byteLength, this.byteLength - offset);
+        this.set(src.subarray(0, count), offset);
+        return count;
+    }
+    toString(encoding = "utf8", start = 0, end = this.byteLength) {
+        const slice = this.subarray(start, end);
+        if (encoding === "latin1" || encoding === "binary") {
+            let out = "";
+            const CHUNK = 0x8000;
+            for (let i = 0; i < slice.length; i += CHUNK) {
+                out += String.fromCharCode(...slice.subarray(i, Math.min(slice.length, i + CHUNK)));
+            }
+            return out;
+        }
+        return new TextDecoder().decode(slice);
+    }
+}
+const Buffer = BrowserBuffer;
 
+function emitProgress(opts, percent, stage) {
+    try { opts?.onProgress?.({ percent, stage }); } catch (_) {}
+}
+function bufferView(input) {
+    if (input instanceof BrowserBuffer) return input;
+    if (input instanceof Uint8Array) return new BrowserBuffer(input.buffer, input.byteOffset, input.byteLength);
+    if (input instanceof ArrayBuffer) return new BrowserBuffer(input);
+    throw new TypeError("Expected ArrayBuffer or Uint8Array input");
+}
+
+function readTopLevelHeader(buf, offset, scopeEnd, parentType = "file") {
+    if (offset < 0n || scopeEnd < offset) throw new Mp4Error("Invalid parser scope");
+    const available = scopeEnd - offset;
+    if (available < 8n) throw boxParseError("Truncated MP4 box header", "????", offset, parentType, "unknown", available);
+    const o = safeNumber(offset, "top-level box offset");
+    const rawSize = buf.readUInt32BE(o);
+    const type = typeFrom(buf, o + 4);
+    let headerSize = 8n;
+    let declaredSize;
+    let sizeWasZero = false;
+    let usedLargeSize = false;
+    if (rawSize === 1) {
+        if (available < 16n) throw boxParseError("Truncated extended MP4 box header", type, offset, parentType, "largesize", available);
+        declaredSize = readU64BE(buf, o + 8);
+        headerSize = 16n;
+        usedLargeSize = true;
+    } else if (rawSize === 0) {
+        declaredSize = available;
+        sizeWasZero = true;
+    } else declaredSize = BigInt(rawSize);
+    if (declaredSize < headerSize || declaredSize > available) {
+        throw boxParseError("Malformed MP4 box", type, offset, parentType, declaredSize, available);
+    }
     return {
-        type,
-        offset: o,
-        size,
-        hs,
-        cStart: o + hs,
-        end: o + size,
-        pStart: o + hs,
-        pEnd: o + hs,
-        children: [],
+        type, start: offset, size: declaredSize, end: offset + declaredSize,
+        headerSize, contentStart: offset + headerSize, payloadSize: declaredSize - headerSize,
+        sizeWasZero, usedLargeSize, rawSize,
     };
 }
-
-function parseBoxes(bytes, start = 0, end = null) {
-    const finalEnd = end === null ? bytes.byteLength : end;
+function parseTopLevelBuffer(buf) {
+    const fileSize = BigInt(buf.byteLength);
     const boxes = [];
-    let o = start;
-
-    while (o + 8 <= finalEnd) {
-        const box = readBox(bytes, o, finalEnd);
-        if (CONTAINERS.has(box.type)) {
-            box.pStart = box.cStart;
-            box.pEnd = box.cStart;
-            box.children = parseBoxes(bytes, box.cStart, box.end);
-        }
+    let offset = 0n;
+    while (offset < fileSize) {
+        if (fileSize - offset < 8n) throw new Mp4Error(`Trailing ${fileSize - offset} byte(s) after final top-level atom at offset ${offset}`);
+        const box = readTopLevelHeader(buf, offset, fileSize, "file");
         boxes.push(box);
-        o = box.end;
+        offset = box.end;
+        if (box.sizeWasZero) break;
     }
-
+    if (offset !== fileSize) throw new Mp4Error(`Top-level MP4 parse ended at ${offset}, file size is ${fileSize}`);
     return boxes;
 }
 
+class Mp4Error extends Error {
+  constructor(message, details = null) {
+    super(message);
+    this.name = 'Mp4Error';
+    this.details = details;
+  }
+}
+
+function hex(n) {
+  return `0x${BigInt(n).toString(16)}`;
+}
+
+function safeNumber(v, label = 'value') {
+  const b = BigInt(v);
+  if (b < 0n || b > MAX_SAFE_BIG) {
+    throw new Mp4Error(`${label} exceeds JavaScript safe integer range: ${b}`);
+  }
+  return Number(b);
+}
+
+function ensureBufferLength(sizeBig, label) {
+  const size = safeNumber(sizeBig, label);
+  // Buffer.alloc will also enforce the runtime-specific hard limit. This
+  // pre-check gives a clearer message for enormous sample tables/moov boxes.
+  if (size < 0) throw new Mp4Error(`Invalid ${label}: ${size}`);
+  return size;
+}
+
+
+function readU64BE(buf, offset) {
+  const hi = BigInt(buf.readUInt32BE(offset));
+  const lo = BigInt(buf.readUInt32BE(offset + 4));
+  return (hi << 32n) | lo;
+}
+
+function writeU64BE(buf, offset, value) {
+  const v = BigInt(value);
+  if (v < 0n || v > UINT64_MAX) throw new Mp4Error(`64-bit integer out of range: ${v}`);
+  buf.writeUInt32BE(Number((v >> 32n) & UINT32_MAX), offset);
+  buf.writeUInt32BE(Number(v & UINT32_MAX), offset + 4);
+}
+
+function typeFrom(buf, offset) {
+  return buf.toString('latin1', offset, offset + 4);
+}
+
+function rawType(type) {
+  if (Buffer.isBuffer(type)) {
+    if (type.length !== 4) throw new Mp4Error('Box type buffer must be exactly 4 bytes');
+    return type;
+  }
+  const out = Buffer.allocUnsafe(4);
+  for (let i = 0; i < 4; i++) out[i] = type.charCodeAt(i) & 0xFF;
+  return out;
+}
+
+function printableType(type) {
+  return [...Buffer.from(type, 'latin1')]
+    .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : `\\x${b.toString(16).padStart(2, '0')}`))
+    .join('');
+}
+
+function boxParseError(kind, boxType, absoluteOffset, parentType, declaredSize, available) {
+  const t = printableType(boxType || '????');
+  return new Mp4Error(
+    `${kind}: atom='${t}' offset=${absoluteOffset} parent='${parentType}' ` +
+      `declaredSize=${declaredSize} available=${available}`,
+  );
+}
+
+
+function readBufferBox(buf, offset, end, parentType, absBase = 0n) {
+  const available = end - offset;
+  const abs = absBase + BigInt(offset);
+  if (available < 8) {
+    throw boxParseError('Truncated MP4 child header', '????', abs, parentType, 'unknown', BigInt(available));
+  }
+
+  const rawSize = buf.readUInt32BE(offset);
+  const type = typeFrom(buf, offset + 4);
+  let headerSize = 8;
+  let sizeBig;
+  let sizeWasZero = false;
+  let usedLargeSize = false;
+
+  if (rawSize === 1) {
+    if (available < 16) {
+      throw boxParseError('Truncated extended child header', type, abs, parentType, 'largesize', BigInt(available));
+    }
+    sizeBig = readU64BE(buf, offset + 8);
+    headerSize = 16;
+    usedLargeSize = true;
+  } else if (rawSize === 0) {
+    sizeBig = BigInt(available);
+    sizeWasZero = true;
+  } else {
+    sizeBig = BigInt(rawSize);
+  }
+
+  if (sizeBig < BigInt(headerSize) || sizeBig > BigInt(available)) {
+    throw boxParseError('Malformed MP4 child box', type, abs, parentType, sizeBig, BigInt(available));
+  }
+  const size = safeNumber(sizeBig, `box '${printableType(type)}' size`);
+
+  return {
+    type,
+    offset,
+    absOffset: abs,
+    size,
+    sizeBig,
+    end: offset + size,
+    headerSize,
+    contentStart: offset + headerSize,
+    sizeWasZero,
+    usedLargeSize,
+    rawSize,
+    parentType,
+    children: [],
+  };
+}
+
+function parseBoxStream(buf, start, end, parentType, absBase = 0n, strict = true) {
+  const boxes = [];
+  let offset = start;
+  while (offset < end) {
+    if (end - offset < 8) {
+      if (!strict) return null;
+      throw boxParseError(
+        'Trailing bytes in MP4 container',
+        '????',
+        absBase + BigInt(offset),
+        parentType,
+        'unknown',
+        BigInt(end - offset),
+      );
+    }
+    let box;
+    try {
+      box = readBufferBox(buf, offset, end, parentType, absBase);
+    } catch (e) {
+      if (!strict) return null;
+      throw e;
+    }
+    boxes.push(box);
+    offset = box.end;
+    if (box.sizeWasZero) break;
+  }
+  if (offset !== end) {
+    if (!strict) return null;
+    throw new Mp4Error(`Child-box stream for '${parentType}' did not consume its complete payload`);
+  }
+  return boxes;
+}
+
+function parseStructuralTree(buf, root, absBase) {
+  function descend(box) {
+    if (!STRUCTURAL_CONTAINERS.has(box.type)) return;
+    box.children = parseBoxStream(buf, box.contentStart, box.end, box.type, absBase, true);
+    for (const child of box.children) descend(child);
+  }
+  descend(root);
+  return root;
+}
+
 function findChild(box, type) {
-    return box.children.find((c) => c.type === type) || null;
+  return box?.children?.find((c) => c.type === type) || null;
 }
 
-function findDesc(box, path) {
-    let cur = box;
-    for (const t of path) {
-        cur = findChild(cur, t);
-        if (!cur) return null;
-    }
-    return cur;
+function findChildren(box, type) {
+  return box?.children?.filter((c) => c.type === type) || [];
 }
 
-function makeBox(type, payload) {
-    const size = 8 + payload.byteLength;
-    const out = new Uint8Array(size);
-    writeU32(out, 0, size);
-    writeType(out, 4, type);
-    out.set(payload, 8);
+function findDesc(box, pathTypes) {
+  let cur = box;
+  for (const t of pathTypes) {
+    cur = findChild(cur, t);
+    if (!cur) return null;
+  }
+  return cur;
+}
+
+function boxPayloadSlice(buf, box) {
+  return buf.subarray(box.contentStart, box.end);
+}
+
+function boxRawSlice(buf, box) {
+  return buf.subarray(box.offset, box.end);
+}
+
+function makeBox(type, payload, options = {}) {
+  const typeBytes = rawType(type);
+  const payloadLength = BigInt(payload.length);
+  const preserveExtended = !!options.preserveExtended;
+  const forceSizeZero = !!options.forceSizeZero;
+
+  if (forceSizeZero) {
+    const out = Buffer.allocUnsafe(8 + payload.length);
+    out.writeUInt32BE(0, 0);
+    typeBytes.copy(out, 4);
+    payload.copy(out, 8);
     return out;
+  }
+
+  const normalSize = 8n + payloadLength;
+  const useExtended = preserveExtended || normalSize > UINT32_MAX;
+  if (!useExtended) {
+    const out = Buffer.allocUnsafe(Number(normalSize));
+    out.writeUInt32BE(Number(normalSize), 0);
+    typeBytes.copy(out, 4);
+    payload.copy(out, 8);
+    return out;
+  }
+
+  const extendedSize = 16n + payloadLength;
+  const len = ensureBufferLength(extendedSize, `box '${printableType(typeBytes.toString('latin1'))}'`);
+  const out = Buffer.allocUnsafe(len);
+  out.writeUInt32BE(1, 0);
+  typeBytes.copy(out, 4);
+  writeU64BE(out, 8, extendedSize);
+  payload.copy(out, 16);
+  return out;
 }
 
-function cat(parts) {
-    const normalized = parts.map((p) =>
-        p instanceof Uint8Array ? p : new Uint8Array(p),
+function makeBoxLike(box, payload) {
+  return makeBox(box.type, payload, { preserveExtended: box.usedLargeSize });
+}
+
+function assertRange(box, relativeOffset, bytesNeeded, label) {
+  const start = box.contentStart + relativeOffset;
+  const end = start + bytesNeeded;
+  if (start < box.contentStart || end > box.end) {
+    throw new Mp4Error(`${label}: atom='${printableType(box.type)}' offset=${box.absOffset} requires ${bytesNeeded} byte(s), available=${box.end - start}`);
+  }
+  return start;
+}
+
+function checkedTableBytes(count, entrySize, baseBytes, box, label) {
+  const countBig = BigInt(count);
+  const need = BigInt(baseBytes) + countBig * BigInt(entrySize);
+  const available = BigInt(box.end - box.contentStart);
+  if (need > available) {
+    throw new Mp4Error(`${label}: atom='${box.type}' offset=${box.absOffset} entryCount=${countBig} entrySize=${entrySize} required=${need} available=${available}`);
+  }
+  return safeNumber(need, `${label} table byte count`);
+}
+
+function parseStco(box, buf) {
+  assertRange(box, 0, 8, 'Invalid stco table header');
+  const count = buf.readUInt32BE(box.contentStart + 4);
+  checkedTableBytes(count, 4, 8, box, 'Invalid stco table');
+  const offsets = new Array(count);
+  let p = box.contentStart + 8;
+  for (let i = 0; i < count; i++, p += 4) offsets[i] = BigInt(buf.readUInt32BE(p));
+  return { versionFlags: Buffer.from(buf.subarray(box.contentStart, box.contentStart + 4)), offsets };
+}
+
+function parseCo64(box, buf) {
+  assertRange(box, 0, 8, 'Invalid co64 table header');
+  const count = buf.readUInt32BE(box.contentStart + 4);
+  checkedTableBytes(count, 8, 8, box, 'Invalid co64 table');
+  const offsets = new Array(count);
+  let p = box.contentStart + 8;
+  for (let i = 0; i < count; i++, p += 8) offsets[i] = readU64BE(buf, p);
+  return { versionFlags: Buffer.from(buf.subarray(box.contentStart, box.contentStart + 4)), offsets };
+}
+
+function buildStco(offsets, versionFlags = Buffer.alloc(4)) {
+  if (offsets.length > 0xFFFFFFFF) throw new Mp4Error('stco entry count exceeds uint32');
+  for (const off of offsets) {
+    if (off < 0n || off > UINT32_MAX) throw new Mp4Error(`stco offset out of 32-bit range: ${off}`);
+  }
+  const payloadLen = 8n + BigInt(offsets.length) * 4n;
+  const p = Buffer.allocUnsafe(ensureBufferLength(payloadLen, 'stco payload'));
+  versionFlags.copy(p, 0, 0, 4);
+  p.writeUInt32BE(offsets.length, 4);
+  for (let i = 0; i < offsets.length; i++) p.writeUInt32BE(Number(offsets[i]), 8 + i * 4);
+  return makeBox('stco', p);
+}
+
+function buildCo64(offsets, versionFlags = Buffer.alloc(4)) {
+  if (offsets.length > 0xFFFFFFFF) throw new Mp4Error('co64 entry count exceeds uint32');
+  const payloadLen = 8n + BigInt(offsets.length) * 8n;
+  const p = Buffer.allocUnsafe(ensureBufferLength(payloadLen, 'co64 payload'));
+  versionFlags.copy(p, 0, 0, 4);
+  p.writeUInt32BE(offsets.length, 4);
+  for (let i = 0; i < offsets.length; i++) writeU64BE(p, 8 + i * 8, offsets[i]);
+  return makeBox('co64', p);
+}
+
+function parseStsz(box, buf) {
+  assertRange(box, 0, 12, 'Invalid stsz table header');
+  const versionFlags = Buffer.from(buf.subarray(box.contentStart, box.contentStart + 4));
+  const defaultSize = buf.readUInt32BE(box.contentStart + 4);
+  const sampleCount = buf.readUInt32BE(box.contentStart + 8);
+  if (defaultSize !== 0) {
+    return { sourceType: 'stsz', versionFlags, sampleCount, defaultSize, sizes: null };
+  }
+  checkedTableBytes(sampleCount, 4, 12, box, 'Invalid stsz table');
+  const sizes = new Array(sampleCount);
+  let p = box.contentStart + 12;
+  for (let i = 0; i < sampleCount; i++, p += 4) sizes[i] = buf.readUInt32BE(p);
+  return { sourceType: 'stsz', versionFlags, sampleCount, defaultSize: 0, sizes };
+}
+
+function parseStz2(box, buf) {
+  // FullBox + reserved(24) + field_size(8) + sample_count(32) + packed entries
+  assertRange(box, 0, 12, 'Invalid stz2 table header');
+  const versionFlags = Buffer.from(buf.subarray(box.contentStart, box.contentStart + 4));
+  const fieldSize = buf[box.contentStart + 7];
+  const sampleCount = buf.readUInt32BE(box.contentStart + 8);
+  if (![4, 8, 16].includes(fieldSize)) throw new Mp4Error(`Invalid stz2 field_size=${fieldSize} at ${box.absOffset}`);
+  const packedBytes = fieldSize === 4 ? Math.ceil(sampleCount / 2) : sampleCount * (fieldSize / 8);
+  checkedTableBytes(packedBytes, 1, 12, box, 'Invalid stz2 table');
+  const sizes = new Array(sampleCount);
+  let p = box.contentStart + 12;
+  if (fieldSize === 4) {
+    for (let i = 0; i < sampleCount; i++) {
+      const byte = buf[p + (i >> 1)];
+      sizes[i] = (i & 1) === 0 ? (byte >> 4) & 0x0F : byte & 0x0F;
+    }
+  } else if (fieldSize === 8) {
+    for (let i = 0; i < sampleCount; i++) sizes[i] = buf[p + i];
+  } else {
+    for (let i = 0; i < sampleCount; i++) sizes[i] = buf.readUInt16BE(p + i * 2);
+  }
+  return { sourceType: 'stz2', versionFlags, sampleCount, defaultSize: 0, sizes, fieldSize };
+}
+
+function getSampleSize(sampleInfo, index) {
+  return sampleInfo.defaultSize !== 0 ? sampleInfo.defaultSize : sampleInfo.sizes[index];
+}
+
+function buildInflatedStsz(sampleInfo, fakeCount, fakeSize) {
+  const finalCountBig = BigInt(sampleInfo.sampleCount) + BigInt(fakeCount);
+  if (finalCountBig > UINT32_MAX) throw new Mp4Error(`Invalid stsz table: final sample_count ${finalCountBig} exceeds uint32`);
+  const finalCount = Number(finalCountBig);
+
+  // Fake samples differ from most real default-size tables, so always emit
+  // explicit sizes. This also safely promotes stz2 to ordinary stsz.
+  const payloadLen = 12n + BigInt(finalCount) * 4n;
+  const p = Buffer.allocUnsafe(ensureBufferLength(payloadLen, 'inflated stsz payload'));
+  sampleInfo.versionFlags.copy(p, 0, 0, 4);
+  p.writeUInt32BE(0, 4);
+  p.writeUInt32BE(finalCount, 8);
+  let out = 12;
+  for (let i = 0; i < sampleInfo.sampleCount; i++, out += 4) {
+    p.writeUInt32BE(getSampleSize(sampleInfo, i), out);
+  }
+  for (let i = 0; i < fakeCount; i++, out += 4) p.writeUInt32BE(fakeSize, out);
+  return makeBox('stsz', p);
+}
+
+function parseStsc(box, buf) {
+  assertRange(box, 0, 8, 'Invalid stsc table header');
+  const versionFlags = Buffer.from(buf.subarray(box.contentStart, box.contentStart + 4));
+  const count = buf.readUInt32BE(box.contentStart + 4);
+  checkedTableBytes(count, 12, 8, box, 'Invalid stsc table');
+  const rows = new Array(count);
+  let p = box.contentStart + 8;
+  for (let i = 0; i < count; i++, p += 12) {
+    rows[i] = {
+      firstChunk: buf.readUInt32BE(p),
+      samplesPerChunk: buf.readUInt32BE(p + 4),
+      sampleDescriptionIndex: buf.readUInt32BE(p + 8),
+    };
+  }
+  return { versionFlags, rows };
+}
+
+function validateStsc(rows, chunkCount, sampleCount, label = 'stsc') {
+  if (chunkCount === 0 && sampleCount === 0) return { mappedSamples: 0n, lastDescriptionIndex: 1 };
+  if (rows.length === 0) throw new Mp4Error(`Invalid ${label} mapping: no entries for ${chunkCount} chunks`);
+  if (rows[0].firstChunk !== 1) throw new Mp4Error(`Invalid ${label} mapping: first entry must start at chunk 1`);
+
+  let mapped = 0n;
+  let lastDesc = 1;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const next = i + 1 < rows.length ? rows[i + 1].firstChunk : chunkCount + 1;
+    if (r.firstChunk < 1 || r.samplesPerChunk < 1 || r.sampleDescriptionIndex < 1) {
+      throw new Mp4Error(`Invalid ${label} entry ${i}: firstChunk=${r.firstChunk}, samplesPerChunk=${r.samplesPerChunk}, description=${r.sampleDescriptionIndex}`);
+    }
+    if (i > 0 && r.firstChunk <= rows[i - 1].firstChunk) throw new Mp4Error(`Invalid ${label}: first_chunk values are not strictly increasing`);
+    if (r.firstChunk > chunkCount || next > chunkCount + 1 || next <= r.firstChunk) {
+      throw new Mp4Error(`Invalid ${label}: chunk run ${r.firstChunk}..${next - 1} outside chunk_count=${chunkCount}`);
+    }
+    mapped += BigInt(next - r.firstChunk) * BigInt(r.samplesPerChunk);
+    lastDesc = r.sampleDescriptionIndex;
+  }
+  if (mapped !== BigInt(sampleCount)) {
+    throw new Mp4Error(`Invalid ${label} mapping: maps ${mapped} samples but sample table contains ${sampleCount}`);
+  }
+  return { mappedSamples: mapped, lastDescriptionIndex: lastDesc };
+}
+
+function buildInflatedStsc(stscInfo, oldChunkCount, fakeCount) {
+  if (fakeCount === 0) {
+    const p = Buffer.allocUnsafe(8 + stscInfo.rows.length * 12);
+    stscInfo.versionFlags.copy(p, 0, 0, 4);
+    p.writeUInt32BE(stscInfo.rows.length, 4);
+    stscInfo.rows.forEach((r, i) => {
+      const o = 8 + i * 12;
+      p.writeUInt32BE(r.firstChunk, o);
+      p.writeUInt32BE(r.samplesPerChunk, o + 4);
+      p.writeUInt32BE(r.sampleDescriptionIndex, o + 8);
+    });
+    return makeBox('stsc', p);
+  }
+
+  if (BigInt(oldChunkCount) + BigInt(fakeCount) > UINT32_MAX) {
+    throw new Mp4Error('Inflated audio chunk count exceeds uint32');
+  }
+  const rows = stscInfo.rows.map((r) => ({ ...r }));
+  const last = rows[rows.length - 1];
+  const desc = last?.sampleDescriptionIndex || 1;
+  if (!last || last.samplesPerChunk !== 1 || last.sampleDescriptionIndex !== desc) {
+    rows.push({ firstChunk: oldChunkCount + 1, samplesPerChunk: 1, sampleDescriptionIndex: desc });
+  } else {
+    // Existing last run already maps one sample per chunk; extending the chunk
+    // table automatically extends that run to the new fake chunks.
+  }
+
+  const p = Buffer.allocUnsafe(8 + rows.length * 12);
+  stscInfo.versionFlags.copy(p, 0, 0, 4);
+  p.writeUInt32BE(rows.length, 4);
+  rows.forEach((r, i) => {
+    const o = 8 + i * 12;
+    p.writeUInt32BE(r.firstChunk, o);
+    p.writeUInt32BE(r.samplesPerChunk, o + 4);
+    p.writeUInt32BE(r.sampleDescriptionIndex, o + 8);
+  });
+  return makeBox('stsc', p);
+}
+
+function parseStts(box, buf) {
+  assertRange(box, 0, 8, 'Invalid stts table header');
+  const versionFlags = Buffer.from(buf.subarray(box.contentStart, box.contentStart + 4));
+  const count = buf.readUInt32BE(box.contentStart + 4);
+  checkedTableBytes(count, 8, 8, box, 'Invalid stts table');
+  const rows = new Array(count);
+  let p = box.contentStart + 8;
+  let totalSamples = 0n;
+  let totalDuration = 0n;
+  for (let i = 0; i < count; i++, p += 8) {
+    const sampleCount = buf.readUInt32BE(p);
+    const sampleDelta = buf.readUInt32BE(p + 4);
+    if (sampleCount === 0) throw new Mp4Error(`Invalid stts entry ${i}: sample_count=0`);
+    rows[i] = { sampleCount, sampleDelta };
+    totalSamples += BigInt(sampleCount);
+    totalDuration += BigInt(sampleCount) * BigInt(sampleDelta);
+  }
+  return { versionFlags, rows, totalSamples, totalDuration };
+}
+
+function buildInflatedStts(sttsInfo, fakeCount) {
+  if (fakeCount === 0) return null;
+  const rows = sttsInfo.rows.map((r) => ({ ...r }));
+  // Zero delta is intentional for this method: the extra sample-table entries
+  // exist without extending the declared/intended media timeline.
+  if (rows.length && rows[rows.length - 1].sampleDelta === 0) {
+    const merged = BigInt(rows[rows.length - 1].sampleCount) + BigInt(fakeCount);
+    if (merged > UINT32_MAX) throw new Mp4Error('stts zero-delta run exceeds uint32 sample_count');
+    rows[rows.length - 1].sampleCount = Number(merged);
+  } else {
+    rows.push({ sampleCount: fakeCount, sampleDelta: 0 });
+  }
+  const p = Buffer.allocUnsafe(8 + rows.length * 8);
+  sttsInfo.versionFlags.copy(p, 0, 0, 4);
+  p.writeUInt32BE(rows.length, 4);
+  rows.forEach((r, i) => {
+    p.writeUInt32BE(r.sampleCount, 8 + i * 8);
+    p.writeUInt32BE(r.sampleDelta, 12 + i * 8);
+  });
+  return makeBox('stts', p);
+}
+
+function handlerType(mdia, moovBuf) {
+  const hdlr = findChild(mdia, 'hdlr');
+  if (!hdlr) return null;
+  // hdlr is a FullBox: version/flags (4), pre_defined (4), handler_type (4)
+  if (hdlr.contentStart + 12 > hdlr.end) return null;
+  return typeFrom(moovBuf, hdlr.contentStart + 8);
+}
+
+function detectCodec(stbl, moovBuf) {
+  const stsd = findChild(stbl, 'stsd');
+  if (!stsd || stsd.contentStart + 16 > stsd.end) return 'unknown';
+  const entryCount = moovBuf.readUInt32BE(stsd.contentStart + 4);
+  if (entryCount < 1) return 'unknown';
+  const entry = stsd.contentStart + 8;
+  if (entry + 8 > stsd.end) return 'unknown';
+  return typeFrom(moovBuf, entry + 4);
+}
+
+function codecLabel(fourcc) {
+  const map = {
+    avc1: 'H.264/AVC', avc3: 'H.264/AVC',
+    hvc1: 'HEVC', hev1: 'HEVC', dvhe: 'Dolby Vision/HEVC', dvh1: 'Dolby Vision/HEVC',
+    mp4v: 'MPEG-4 Visual', vp09: 'VP9', av01: 'AV1',
+  };
+  return map[fourcc] || fourcc || 'unknown';
+}
+
+function buildDataAtom(text) {
+  const str = Buffer.from(text, 'utf8');
+  const p = Buffer.allocUnsafe(8 + str.length);
+  p.writeUInt32BE(1, 0); // type indicator = UTF-8
+  p.writeUInt32BE(0, 4); // locale
+  str.copy(p, 8);
+  return makeBox('data', p);
+}
+
+function buildIlstTextTag(typeBytes, text) {
+  return makeBox(typeBytes, buildDataAtom(text));
+}
+
+const CMT_TYPE = Buffer.from([0xA9, 0x63, 0x6D, 0x74]); // ©cmt
+const NAM_TYPE = Buffer.from([0xA9, 0x6E, 0x61, 0x6D]); // ©nam
+
+function buildMetadataHdlr() {
+  const name = Buffer.from('appl\0', 'latin1');
+  const p = Buffer.alloc(24 + name.length, 0);
+  p.writeUInt32BE(0, 0); // FullBox version/flags
+  p.writeUInt32BE(0, 4); // pre_defined
+  Buffer.from('mdir', 'latin1').copy(p, 8);
+  // reserved[3] = zero at 12..23
+  name.copy(p, 24);
+  return makeBox('hdlr', p);
+}
+
+function buildFreshIlst() {
+  return makeBox('ilst', Buffer.concat([
+    buildIlstTextTag(NAM_TYPE, METHOD),
+    buildIlstTextTag(CMT_TYPE, METHOD),
+  ]));
+}
+
+function buildFreshMeta() {
+  const fullBox = Buffer.alloc(4, 0);
+  return makeBox('meta', Buffer.concat([fullBox, buildMetadataHdlr(), buildFreshIlst()]));
+}
+
+function buildFreshUdta() {
+  return makeBox('udta', buildFreshMeta());
+}
+
+function detectMetaLayout(moovBuf, metaBox, moovAbsBase) {
+  // Standard ISO/MP4 meta is a FullBox: version+flags then child atoms.
+  if (metaBox.contentStart + 4 <= metaBox.end) {
+    const standard = parseBoxStream(
+      moovBuf,
+      metaBox.contentStart + 4,
+      metaBox.end,
+      'meta',
+      moovAbsBase,
+      false,
     );
-    const total = normalized.reduce((sum, p) => sum + p.byteLength, 0);
-    const out = new Uint8Array(total);
-    let cursor = 0;
-    for (const p of normalized) {
-        out.set(p, cursor);
-        cursor += p.byteLength;
-    }
-    return out;
+    if (standard) return { prefix: Buffer.from(moovBuf.subarray(metaBox.contentStart, metaBox.contentStart + 4)), children: standard, standard: true };
+  }
+
+  // Some QuickTime/vendor files use meta-like payloads where children begin
+  // immediately. Accept only when the entire payload validates as boxes.
+  const direct = parseBoxStream(moovBuf, metaBox.contentStart, metaBox.end, 'meta', moovAbsBase, false);
+  if (direct) return { prefix: Buffer.alloc(0), children: direct, standard: false };
+  return null;
 }
 
-function parseStsz(box, bytes) {
-    const defSz = readU32(bytes, box.cStart + 4);
-    const count = readU32(bytes, box.cStart + 8);
-    if (defSz !== 0) return Array(count).fill(defSz);
-
-    const out = new Array(count);
-    for (let i = 0; i < count; i++) {
-        out[i] = readU32(bytes, box.cStart + 12 + i * 4);
-    }
-    return out;
+function stripAndSetIlst(moovBuf, ilstBox, moovAbsBase, addMethod) {
+  const children = parseBoxStream(moovBuf, ilstBox.contentStart, ilstBox.end, 'ilst', moovAbsBase, false);
+  if (!children) return null;
+  const parts = [];
+  let hasName = false;
+  for (const c of children) {
+    const raw = moovBuf.subarray(c.offset + 4, c.offset + 8);
+    const isCmt = raw.equals(CMT_TYPE);
+    const isNam = raw.equals(NAM_TYPE);
+    // ©cmt is the requested Method field, so replace existing comments rather
+    // than duplicating them. ©nam is optional: preserve an existing title
+    // exactly and add the Method title only when the file has no ©nam.
+    if (isCmt) continue;
+    if (isNam) hasName = true;
+    parts.push(Buffer.from(boxRawSlice(moovBuf, c)));
+  }
+  if (addMethod) {
+    if (!hasName) parts.push(buildIlstTextTag(NAM_TYPE, METHOD));
+    parts.push(buildIlstTextTag(CMT_TYPE, METHOD));
+  }
+  return makeBoxLike(ilstBox, Buffer.concat(parts));
 }
 
-function parseChunkOffsets(box, bytes) {
-    if (!box || (box.type !== "stco" && box.type !== "co64")) {
-        throw new Error("Missing stco/co64 chunk offset table");
-    }
+function rebuildMetaWithMethod(moovBuf, metaBox, moovAbsBase, addMethod) {
+  const layout = detectMetaLayout(moovBuf, metaBox, moovAbsBase);
+  if (!layout) return null;
 
-    const count = readU32(bytes, box.cStart + 4);
-    const entrySize = box.type === "co64" ? 8 : 4;
-    if (box.cStart + 8 + count * entrySize > box.end) {
-        throw new Error(`Invalid ${box.type} table`);
+  // Avoid injecting ©-style items into mdta/key-index metadata unless it
+  // already carries an © item. If it only uses 'keys', preserve it and let a
+  // fresh iTunes-style meta be added elsewhere.
+  const hasKeys = layout.children.some((c) => c.type === 'keys');
+  const ilst = layout.children.find((c) => c.type === 'ilst');
+  let ilstHasCopyrightTag = false;
+  if (ilst) {
+    const ilstChildren = parseBoxStream(moovBuf, ilst.contentStart, ilst.end, 'ilst', moovAbsBase, false);
+    if (ilstChildren) {
+      ilstHasCopyrightTag = ilstChildren.some((c) => {
+        const raw = moovBuf.subarray(c.offset + 4, c.offset + 8);
+        return raw.equals(CMT_TYPE) || raw.equals(NAM_TYPE);
+      });
     }
+  }
 
-    const out = new Array(count);
-    for (let i = 0; i < count; i++) {
-        const pos = box.cStart + 8 + i * entrySize;
-        out[i] =
-            box.type === "co64" ? readU64(bytes, pos) : readU32(bytes, pos);
+  if (hasKeys && !ilstHasCopyrightTag) {
+    return { buffer: Buffer.from(boxRawSlice(moovBuf, metaBox)), acceptedForMethod: false };
+  }
+
+  const parts = [layout.prefix];
+  let sawIlst = false;
+  for (const child of layout.children) {
+    if (child.type === 'ilst') {
+      sawIlst = true;
+      const rebuilt = stripAndSetIlst(moovBuf, child, moovAbsBase, addMethod);
+      if (!rebuilt) return null;
+      parts.push(rebuilt);
+    } else {
+      parts.push(Buffer.from(boxRawSlice(moovBuf, child)));
     }
-    return out;
+  }
+  if (addMethod && !sawIlst) parts.push(buildFreshIlst());
+  return { buffer: makeBoxLike(metaBox, Buffer.concat(parts)), acceptedForMethod: true };
 }
 
-function parseStsc(box, bytes) {
-    const count = readU32(bytes, box.cStart + 4);
-    const out = new Array(count);
-    for (let i = 0; i < count; i++) {
-        const o = box.cStart + 8 + i * 12;
-        out[i] = [
-            readU32(bytes, o),
-            readU32(bytes, o + 4),
-            readU32(bytes, o + 8),
-        ];
+function rebuildUdtaMetadata(moovBuf, udtaBox, moovAbsBase, state) {
+  const children = parseBoxStream(moovBuf, udtaBox.contentStart, udtaBox.end, 'udta', moovAbsBase, false);
+  if (!children) return null;
+  const parts = [];
+  let hadAcceptedMeta = false;
+
+  for (const child of children) {
+    if (child.type !== 'meta') {
+      parts.push(Buffer.from(boxRawSlice(moovBuf, child)));
+      continue;
     }
-    return out;
+    const shouldAdd = !state.methodPlaced;
+    const rebuilt = rebuildMetaWithMethod(moovBuf, child, moovAbsBase, shouldAdd);
+    if (!rebuilt) {
+      parts.push(Buffer.from(boxRawSlice(moovBuf, child)));
+      continue;
+    }
+    hadAcceptedMeta ||= rebuilt.acceptedForMethod;
+    if (rebuilt.acceptedForMethod && shouldAdd) state.methodPlaced = true;
+    parts.push(rebuilt.buffer);
+  }
+
+  if (!state.methodPlaced && !hadAcceptedMeta) {
+    parts.push(buildFreshMeta());
+    state.methodPlaced = true;
+  } else if (!state.methodPlaced && hadAcceptedMeta) {
+    // This can only happen if an accepted meta was rebuilt without method;
+    // keep deterministic behavior by adding a dedicated standard meta.
+    parts.push(buildFreshMeta());
+    state.methodPlaced = true;
+  }
+
+  return makeBoxLike(udtaBox, Buffer.concat(parts));
+}
+
+function buildMetadataReplacements(moovBuf, moov, moovAbsBase) {
+  const replacements = new Map();
+  const udtas = findChildren(moov, 'udta');
+  const directMetas = findChildren(moov, 'meta');
+  const state = { methodPlaced: false };
+  for (const udta of udtas) {
+    const rebuilt = rebuildUdtaMetadata(moovBuf, udta, moovAbsBase, state);
+    if (rebuilt) replacements.set(udta, rebuilt);
+  }
+  for (const meta of directMetas) {
+    const shouldAdd = !state.methodPlaced;
+    const rebuilt = rebuildMetaWithMethod(moovBuf, meta, moovAbsBase, shouldAdd);
+    if (!rebuilt) continue;
+    replacements.set(meta, rebuilt.buffer);
+    if (rebuilt.acceptedForMethod && shouldAdd) state.methodPlaced = true;
+  }
+  const appendFreshUdta = !state.methodPlaced;
+  return { replacements, appendFreshUdta };
+}
+
+function rebuildTree(buf, box, replacements, options = {}) {
+  if (replacements.has(box)) return replacements.get(box);
+  if (!box.children || box.children.length === 0) return Buffer.from(boxRawSlice(buf, box));
+
+  const parts = [];
+  let cursor = box.contentStart;
+  for (const child of box.children) {
+    if (cursor < child.offset) parts.push(Buffer.from(buf.subarray(cursor, child.offset)));
+    parts.push(rebuildTree(buf, child, replacements, options));
+    cursor = child.end;
+  }
+  if (cursor < box.end) parts.push(Buffer.from(buf.subarray(cursor, box.end)));
+  if (box.type === 'moov' && options.appendFreshUdta) parts.push(buildFreshUdta());
+  return makeBoxLike(box, Buffer.concat(parts));
+}
+
+function trackEnabled(trak, moovBuf) {
+  const tkhd = findChild(trak, 'tkhd');
+  if (!tkhd || tkhd.contentStart + 4 > tkhd.end) return true;
+  const versionAndFlags = moovBuf.readUInt32BE(tkhd.contentStart);
+  return (versionAndFlags & 0x000001) !== 0;
+}
+
+function collectTracks(moov, moovBuf) {
+  const tracks = [];
+  for (const trak of findChildren(moov, 'trak')) {
+    const mdia = findChild(trak, 'mdia');
+    if (!mdia) continue;
+    const handler = handlerType(mdia, moovBuf);
+    const minf = findChild(mdia, 'minf');
+    const stbl = minf ? findChild(minf, 'stbl') : null;
+    tracks.push({
+      trak,
+      mdia,
+      handler,
+      minf,
+      stbl,
+      codec: stbl ? detectCodec(stbl, moovBuf) : 'unknown',
+      enabled: trackEnabled(trak, moovBuf),
+    });
+  }
+  return tracks;
+}
+
+function getOffsetBoxesForTrack(track) {
+  if (!track.stbl) return [];
+  return track.stbl.children.filter((c) => c.type === 'stco' || c.type === 'co64');
+}
+
+function parseOffsetTable(box, moovBuf) {
+  return box.type === 'co64' ? parseCo64(box, moovBuf) : parseStco(box, moovBuf);
+}
+
+function validateAudioChunkByteRanges(sampleInfo, stscInfo, offsetInfo, mdats) {
+  let rowIndex = 0;
+  let sampleIndex = 0;
+  for (let chunkIndex = 1; chunkIndex <= offsetInfo.offsets.length; chunkIndex++) {
+    while (rowIndex + 1 < stscInfo.rows.length && stscInfo.rows[rowIndex + 1].firstChunk <= chunkIndex) rowIndex++;
+    const row = stscInfo.rows[rowIndex];
+    if (!row) throw new Mp4Error(`Invalid audio stsc mapping at chunk ${chunkIndex}`);
+    let chunkBytes = 0n;
+    for (let j = 0; j < row.samplesPerChunk; j++) {
+      if (sampleIndex >= sampleInfo.sampleCount) throw new Mp4Error(`Invalid audio stsc mapping: chunk ${chunkIndex} references sample beyond stsz/stz2`);
+      chunkBytes += BigInt(getSampleSize(sampleInfo, sampleIndex++));
+    }
+    const off = offsetInfo.offsets[chunkIndex - 1];
+    const mdat = locateMdatForOffset(off, mdats);
+    if (!mdat) throw new Mp4Error(`Chunk offset outside mdat: audio chunk=${chunkIndex} offset=${off}`);
+    if (off + chunkBytes > mdat.end) {
+      throw new Mp4Error(`Audio chunk exceeds mdat payload: chunk=${chunkIndex} offset=${off} bytes=${chunkBytes} mdatEnd=${mdat.end}`);
+    }
+  }
+  if (sampleIndex !== sampleInfo.sampleCount) {
+    throw new Mp4Error(`Invalid audio stsc mapping: consumed ${sampleIndex} samples, expected ${sampleInfo.sampleCount}`);
+  }
+}
+
+function getSelectedAudioCandidate(track, moovBuf, mdats) {
+  if (track.handler !== 'soun' || !track.stbl) return null;
+  const stsz = findChild(track.stbl, 'stsz');
+  const stz2 = findChild(track.stbl, 'stz2');
+  const stsc = findChild(track.stbl, 'stsc');
+  const stts = findChild(track.stbl, 'stts');
+  const offsets = getOffsetBoxesForTrack(track);
+  if ((!stsz && !stz2) || (stsz && stz2) || !stsc || !stts || offsets.length !== 1) return null;
+
+  try {
+    const sampleInfo = stsz ? parseStsz(stsz, moovBuf) : parseStz2(stz2, moovBuf);
+    const offsetInfo = parseOffsetTable(offsets[0], moovBuf);
+    const stscInfo = parseStsc(stsc, moovBuf);
+    const sttsInfo = parseStts(stts, moovBuf);
+    if (sampleInfo.sampleCount === 0 || offsetInfo.offsets.length === 0) return null;
+    validateStsc(stscInfo.rows, offsetInfo.offsets.length, sampleInfo.sampleCount, 'audio stsc');
+    if (sttsInfo.totalSamples !== BigInt(sampleInfo.sampleCount)) {
+      throw new Mp4Error(`Invalid audio stts table: maps ${sttsInfo.totalSamples} samples but stsz/stz2 contains ${sampleInfo.sampleCount}`);
+    }
+    validateAudioChunkByteRanges(sampleInfo, stscInfo, offsetInfo, mdats);
+    return { track, sizeBox: stsz || stz2, stsc, stts, offsetBox: offsets[0], sampleInfo, offsetInfo, stscInfo, sttsInfo };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function locateMdatForOffset(offset, mdats) {
+  for (const mdat of mdats) {
+    if (offset >= mdat.contentStart && offset < mdat.end) return mdat;
+  }
+  return null;
+}
+
+function chooseAudioAndTargetMdat(tracks, moovBuf, mdats) {
+  const candidates = [];
+  const audioErrors = [];
+  for (const t of tracks) {
+    const c = getSelectedAudioCandidate(t, moovBuf, mdats);
+    if (!c) continue;
+    if (c.error) { audioErrors.push(c.error); continue; }
+    let lastOffset = -1n;
+    let lastMdat = null;
+    for (const off of c.offsetInfo.offsets) {
+      const mdat = locateMdatForOffset(off, mdats);
+      if (off > lastOffset) { lastOffset = off; lastMdat = mdat; }
+    }
+    if (!lastMdat) continue;
+    candidates.push({ ...c, targetMdat: lastMdat });
+  }
+  if (!candidates.length) {
+    if (audioErrors.length) throw audioErrors[0];
+    throw new Mp4Error('No usable audio track');
+  }
+  // Prefer an enabled track, then the largest continuous sample table. This
+  // avoids blindly assuming track order while leaving secondary tracks intact.
+  candidates.sort((a, b) => Number(b.track.enabled) - Number(a.track.enabled) || b.sampleInfo.sampleCount - a.sampleInfo.sampleCount);
+  return candidates[0];
+}
+
+function collectAllOffsetTables(tracks, moovBuf, selectedAudio) {
+  const tables = [];
+  for (const track of tracks) {
+    for (const box of getOffsetBoxesForTrack(track)) {
+      const parsed = parseOffsetTable(box, moovBuf);
+      tables.push({
+        box,
+        track,
+        originalType: box.type,
+        versionFlags: parsed.versionFlags,
+        originalOffsets: parsed.offsets,
+        isSelectedAudio: box === selectedAudio.offsetBox,
+      });
+    }
+  }
+  return tables;
+}
+
+function originalMdatPayloadSize(mdat) {
+  return mdat.end - mdat.contentStart;
+}
+
+function chooseMdatHeader(targetMdat, newPayloadSize) {
+  if (targetMdat.sizeWasZero) {
+    return { headerSize: 8n, totalSize: 8n + newPayloadSize, sizeZero: true, extended: false };
+  }
+  const normal = 8n + newPayloadSize;
+  const extended = targetMdat.usedLargeSize || normal > UINT32_MAX;
+  const headerSize = extended ? 16n : 8n;
+  const totalSize = headerSize + newPayloadSize;
+  if (totalSize > UINT64_MAX) throw new Mp4Error('Target mdat exceeds 64-bit MP4 box size');
+  return { headerSize, totalSize, sizeZero: false, extended };
+}
+
+function calculateLayout(topBoxes, moovTop, moovLength, targetMdat, fakePayloadSize) {
+  const layout = new Map();
+  let cursor = 0n;
+  for (const box of topBoxes) {
+    let size = box.size;
+    let headerSize = box.headerSize;
+    let sizeZero = box.sizeWasZero;
+    let extended = box.usedLargeSize;
+
+    if (box === moovTop) {
+      size = BigInt(moovLength);
+      headerSize = size > UINT32_MAX || moovTop.usedLargeSize ? 16n : 8n;
+      // moovLength already includes whichever header rebuildTree emitted.
+      // Recover actual header by reading its first size field later; the total
+      // size here is authoritative.
+      sizeZero = false;
+      extended = headerSize === 16n;
+    } else if (box === targetMdat) {
+      const payload = originalMdatPayloadSize(box) + fakePayloadSize;
+      const hdr = chooseMdatHeader(box, payload);
+      size = hdr.totalSize;
+      headerSize = hdr.headerSize;
+      sizeZero = hdr.sizeZero;
+      extended = hdr.extended;
+    }
+
+    const rec = {
+      box,
+      oldStart: box.start,
+      oldEnd: box.end,
+      newStart: cursor,
+      newEnd: cursor + size,
+      newSize: size,
+      newHeaderSize: headerSize,
+      newContentStart: cursor + headerSize,
+      sizeZero,
+      extended,
+    };
+    layout.set(box, rec);
+    cursor += size;
+  }
+  return { layout, outputSize: cursor };
+}
+
+function buildRelocationMap(mdats, layout) {
+  return mdats.map((mdat) => {
+    const rec = layout.get(mdat);
+    return {
+      mdat,
+      oldStart: mdat.contentStart,
+      oldEnd: mdat.end,
+      newStart: rec.newContentStart,
+      newEndOriginal: rec.newContentStart + originalMdatPayloadSize(mdat),
+    };
+  });
+}
+
+function translateOffset(oldOffset, relocationMap) {
+  for (const r of relocationMap) {
+    if (oldOffset >= r.oldStart && oldOffset < r.oldEnd) {
+      return r.newStart + (oldOffset - r.oldStart);
+    }
+  }
+  throw new Mp4Error(`Chunk offset outside mdat: ${oldOffset}`);
+}
+
+function fakeOffsetsFor(targetMdat, layout, fakeCount, fakeSize) {
+  const rec = layout.get(targetMdat);
+  const start = rec.newContentStart + originalMdatPayloadSize(targetMdat);
+  const out = new Array(fakeCount);
+  for (let i = 0; i < fakeCount; i++) out[i] = start + BigInt(i) * BigInt(fakeSize);
+  return out;
+}
+
+function buildOffsetReplacement(table, mappedOffsets, forceCo64) {
+  const useCo64 = table.originalType === 'co64' || forceCo64 || mappedOffsets.some((o) => o > UINT32_MAX);
+  return useCo64 ? buildCo64(mappedOffsets, table.versionFlags) : buildStco(mappedOffsets, table.versionFlags);
+}
+
+function makeZeroOffsetReplacement(table, fakeCount, forceCo64) {
+  const count = table.originalOffsets.length + (table.isSelectedAudio ? fakeCount : 0);
+  const zeros = new Array(count).fill(0n);
+  return buildOffsetReplacement(table, zeros, forceCo64);
+}
+
+function makeMdatHeader(rec) {
+  if (rec.sizeZero) {
+    const h = Buffer.allocUnsafe(8);
+    h.writeUInt32BE(0, 0);
+    h.write('mdat', 4, 4, 'latin1');
+    return h;
+  }
+  if (rec.extended) {
+    const h = Buffer.allocUnsafe(16);
+    h.writeUInt32BE(1, 0);
+    h.write('mdat', 4, 4, 'latin1');
+    writeU64BE(h, 8, rec.newSize);
+    return h;
+  }
+  if (rec.newSize > UINT32_MAX) throw new Mp4Error('Internal error: 32-bit mdat header overflow');
+  const h = Buffer.allocUnsafe(8);
+  h.writeUInt32BE(Number(rec.newSize), 0);
+  h.write('mdat', 4, 4, 'latin1');
+  return h;
+}
+
+function inspectFinalAudioTables(selectedAudio, fakeCount, replacements, offsetReplacementInfo) {
+  const finalSampleCount = BigInt(selectedAudio.sampleInfo.sampleCount) + BigInt(fakeCount);
+  const finalChunkCount = BigInt(selectedAudio.offsetInfo.offsets.length) + BigInt(fakeCount);
+  if (finalSampleCount > UINT32_MAX || finalChunkCount > UINT32_MAX) throw new Mp4Error('Final audio table count overflow');
+
+  const finalStscRows = selectedAudio.stscInfo.rows.map((r) => ({ ...r }));
+  if (fakeCount > 0) {
+    const last = finalStscRows[finalStscRows.length - 1];
+    if (!last || last.samplesPerChunk !== 1) {
+      finalStscRows.push({
+        firstChunk: selectedAudio.offsetInfo.offsets.length + 1,
+        samplesPerChunk: 1,
+        sampleDescriptionIndex: last?.sampleDescriptionIndex || 1,
+      });
+    }
+  }
+  validateStsc(finalStscRows, Number(finalChunkCount), Number(finalSampleCount), 'final audio stsc');
+
+  const finalSttsSamples = selectedAudio.sttsInfo.totalSamples + BigInt(fakeCount);
+  if (finalSttsSamples !== finalSampleCount) {
+    throw new Mp4Error(`Final stts sample count mismatch: stts=${finalSttsSamples}, stsz=${finalSampleCount}`);
+  }
+  if (!replacements.has(selectedAudio.sizeBox) || !replacements.has(selectedAudio.stsc) || !replacements.has(selectedAudio.stts)) {
+    throw new Mp4Error('Final audio sample-table replacements are incomplete');
+  }
+  if (!offsetReplacementInfo) throw new Mp4Error('Final audio chunk-offset replacement is missing');
+}
+
+function verifyFinalChunkOffsets(offsetTables, mappedByTable, relocationMap, targetMdat, layout, fakeCount, fakeSize) {
+  const finalMediaRanges = relocationMap.map((r) => ({ start: r.newStart, end: r.newEndOriginal, mdat: r.mdat }));
+  const targetRec = layout.get(targetMdat);
+  if (fakeCount > 0) {
+    finalMediaRanges.push({
+      start: targetRec.newContentStart + originalMdatPayloadSize(targetMdat),
+      end: targetRec.newContentStart + originalMdatPayloadSize(targetMdat) + BigInt(fakeCount) * BigInt(fakeSize),
+      mdat: targetMdat,
+      fake: true,
+    });
+  }
+
+  for (const table of offsetTables) {
+    const offsets = mappedByTable.get(table);
+    if (!offsets) throw new Mp4Error('Internal error: missing mapped chunk offsets');
+    for (let i = 0; i < offsets.length; i++) {
+      const off = offsets[i];
+      const ok = finalMediaRanges.some((r) => off >= r.start && off < r.end);
+      if (!ok) {
+        throw new Mp4Error(`Generated ${table.originalType} chunk offset outside final mdat: table@${table.box.absOffset} entry=${i} offset=${off}`);
+      }
+    }
+  }
+}
+
+
+
+function buildUniversalPatchPlanFromBuffer(input, opts = {}) {
+    const factor = opts.factor ?? DEFAULT_FACTOR;
+    const fakeSize = opts.fakeSize ?? DEFAULT_FAKE_SIZE;
+    const verbose = !!opts.verbose;
+    if (!Number.isInteger(factor) || factor < 1 || factor > 1000) throw new Mp4Error("factor must be an integer from 1 to 1000");
+    if (!Number.isInteger(fakeSize) || fakeSize < 1 || fakeSize > 1024) throw new Mp4Error("fakeSize must be an integer from 1 to 1024");
+
+    const source = bufferView(input);
+    const fileSize = BigInt(source.byteLength);
+    if (fileSize < 8n) throw new Mp4Error("Input is too small to be an MP4/MOV file");
+
+    emitProgress(opts, 8, "Reading video...");
+    const topBoxes = parseTopLevelBuffer(source);
+    emitProgress(opts, 18, "Parsing MP4...");
+    const moovs = topBoxes.filter((b) => b.type === "moov");
+    const mdats = topBoxes.filter((b) => b.type === "mdat");
+    if (topBoxes.some((b) => b.type === "moof")) throw new Mp4Error("This fragmented MP4 format is not currently supported (moof/traf/trun).");
+    if (moovs.length !== 1) throw new Mp4Error(`Expected exactly one moov box, found ${moovs.length}`);
+    if (!mdats.length) throw new Mp4Error("No mdat box found");
+
+    const moovTop = moovs[0];
+    const moovBuf = Buffer.from(source.subarray(safeNumber(moovTop.start, "moov offset"), safeNumber(moovTop.end, "moov end")));
+    const moovRoot = readBufferBox(moovBuf, 0, moovBuf.length, "file", moovTop.start);
+    if (moovRoot.type !== "moov" || moovRoot.end !== moovBuf.length) throw new Mp4Error("Internal moov parse mismatch");
+    parseStructuralTree(moovBuf, moovRoot, moovTop.start);
+    if (findChild(moovRoot, "mvex")) throw new Mp4Error("This fragmented MP4 format is not currently supported (mvex).");
+
+    emitProgress(opts, 28, "Analyzing tracks...");
+    const tracks = collectTracks(moovRoot, moovBuf);
+    const videoTracks = tracks.filter((t) => t.handler === "vide");
+    if (!videoTracks.length) throw new Mp4Error("No video track");
+    const selectedAudio = chooseAudioAndTargetMdat(tracks, moovBuf, mdats);
+    const realCount = selectedAudio.sampleInfo.sampleCount;
+    const fakeCountBig = BigInt(realCount) * BigInt(factor);
+    const finalCountBig = BigInt(realCount) + fakeCountBig;
+    if (fakeCountBig > UINT32_MAX || finalCountBig > UINT32_MAX) throw new Mp4Error(`Invalid stsz table: ${realCount} real samples with factor ${factor} exceeds uint32 sample_count`);
+    const fakeCount = Number(fakeCountBig);
+    const fakePayloadSize = BigInt(fakeCount) * BigInt(fakeSize);
+    if (fakePayloadSize > MAX_SAFE_BIG) throw new Mp4Error("Fake audio payload is too large for browser memory");
+
+    const offsetTables = collectAllOffsetTables(tracks, moovBuf, selectedAudio);
+    if (!offsetTables.length) throw new Mp4Error("No stco/co64 chunk-offset tables found");
+    for (const table of offsetTables) {
+        for (let i = 0; i < table.originalOffsets.length; i++) {
+            if (!locateMdatForOffset(table.originalOffsets[i], mdats)) throw new Mp4Error(`Chunk offset outside mdat: table='${table.originalType}' atomOffset=${table.box.absOffset} entry=${i} value=${table.originalOffsets[i]}`);
+        }
+    }
+
+    emitProgress(opts, 40, "Patching audio tables...");
+    const baseReplacements = new Map();
+    baseReplacements.set(selectedAudio.sizeBox, buildInflatedStsz(selectedAudio.sampleInfo, fakeCount, fakeSize));
+    baseReplacements.set(selectedAudio.stsc, buildInflatedStsc(selectedAudio.stscInfo, selectedAudio.offsetInfo.offsets.length, fakeCount));
+    const sttsRep = buildInflatedStts(selectedAudio.sttsInfo, fakeCount);
+    if (sttsRep) baseReplacements.set(selectedAudio.stts, sttsRep);
+
+    emitProgress(opts, 50, `Adding ${METHOD}...`);
+    const metadata = buildMetadataReplacements(moovBuf, moovRoot, moovTop.start);
+    for (const [k, v] of metadata.replacements) baseReplacements.set(k, v);
+
+    const forceCo64 = new Set(offsetTables.filter((t) => t.originalType === "co64"));
+    let finalMoov = null, finalLayout = null, finalRelocation = null, mappedByTable = null, finalReplacements = null;
+    let stabilized = false, lastSignature = null, passes = 0;
+    const maxPasses = Math.min(MAX_STABILIZATION_PASSES, offsetTables.length + 8);
+    for (let pass = 1; pass <= maxPasses; pass++) {
+        passes = pass;
+        emitProgress(opts, 55 + Math.min(25, Math.round((pass / maxPasses) * 25)), "Updating offsets...");
+        const measureReplacements = new Map(baseReplacements);
+        for (const table of offsetTables) measureReplacements.set(table.box, makeZeroOffsetReplacement(table, fakeCount, forceCo64.has(table)));
+        const measuredMoov = rebuildTree(moovBuf, moovRoot, measureReplacements, { appendFreshUdta: metadata.appendFreshUdta });
+        const layoutResult = calculateLayout(topBoxes, moovTop, measuredMoov.length, selectedAudio.targetMdat, fakePayloadSize);
+        const relocationMap = buildRelocationMap(mdats, layoutResult.layout);
+        const fakeOffsets = fakeOffsetsFor(selectedAudio.targetMdat, layoutResult.layout, fakeCount, fakeSize);
+        const translated = new Map();
+        let promoted = false;
+        for (const table of offsetTables) {
+            const offsets = table.originalOffsets.map((old) => translateOffset(old, relocationMap));
+            if (table.isSelectedAudio) offsets.push(...fakeOffsets);
+            translated.set(table, offsets);
+            if (table.originalType === "stco" && !forceCo64.has(table) && offsets.some((o) => o > UINT32_MAX)) { forceCo64.add(table); promoted = true; }
+        }
+        if (promoted) continue;
+        const reps = new Map(baseReplacements);
+        for (const table of offsetTables) reps.set(table.box, buildOffsetReplacement(table, translated.get(table), forceCo64.has(table)));
+        const actualMoov = rebuildTree(moovBuf, moovRoot, reps, { appendFreshUdta: metadata.appendFreshUdta });
+        const actualLayoutResult = calculateLayout(topBoxes, moovTop, actualMoov.length, selectedAudio.targetMdat, fakePayloadSize);
+        const signature = `${actualMoov.length}|${actualLayoutResult.outputSize}|${forceCo64.size}|${actualLayoutResult.layout.get(selectedAudio.targetMdat).newHeaderSize}`;
+        if (actualMoov.length !== measuredMoov.length || (lastSignature !== null && signature !== lastSignature)) { lastSignature = signature; continue; }
+        const actualRelocation = buildRelocationMap(mdats, actualLayoutResult.layout);
+        const actualFakeOffsets = fakeOffsetsFor(selectedAudio.targetMdat, actualLayoutResult.layout, fakeCount, fakeSize);
+        const actualMapped = new Map();
+        let needsPromotion = false;
+        for (const table of offsetTables) {
+            const offsets = table.originalOffsets.map((old) => translateOffset(old, actualRelocation));
+            if (table.isSelectedAudio) offsets.push(...actualFakeOffsets);
+            actualMapped.set(table, offsets);
+            if (table.originalType === "stco" && !forceCo64.has(table) && offsets.some((o) => o > UINT32_MAX)) { forceCo64.add(table); needsPromotion = true; }
+        }
+        if (needsPromotion) continue;
+        const exactReps = new Map(baseReplacements);
+        for (const table of offsetTables) exactReps.set(table.box, buildOffsetReplacement(table, actualMapped.get(table), forceCo64.has(table)));
+        const exactMoov = rebuildTree(moovBuf, moovRoot, exactReps, { appendFreshUdta: metadata.appendFreshUdta });
+        const exactLayout = calculateLayout(topBoxes, moovTop, exactMoov.length, selectedAudio.targetMdat, fakePayloadSize);
+        if (exactMoov.length !== actualMoov.length || exactLayout.outputSize !== actualLayoutResult.outputSize) { lastSignature = `${exactMoov.length}|${exactLayout.outputSize}|${forceCo64.size}`; continue; }
+        finalMoov = exactMoov; finalLayout = exactLayout; finalRelocation = buildRelocationMap(mdats, finalLayout.layout);
+        mappedByTable = actualMapped; finalReplacements = exactReps; stabilized = true; break;
+    }
+    if (!stabilized) throw new Mp4Error("Unable to stabilize MP4 layout");
+
+    emitProgress(opts, 88, "Validating output...");
+    const selectedTablePlan = offsetTables.find((t) => t.isSelectedAudio);
+    inspectFinalAudioTables(selectedAudio, fakeCount, finalReplacements, selectedTablePlan);
+    verifyFinalChunkOffsets(offsetTables, mappedByTable, finalRelocation, selectedAudio.targetMdat, finalLayout.layout, fakeCount, fakeSize);
+    for (const offsets of mappedByTable.values()) for (const off of offsets) if (off < 0n || off >= finalLayout.outputSize) throw new Mp4Error(`Generated chunk offset outside final file: ${off}`);
+
+    const inputCo64 = offsetTables.filter((t) => t.originalType === "co64").length;
+    const outputCo64 = offsetTables.filter((t) => t.originalType === "co64" || forceCo64.has(t)).length;
+    const videoCodec = videoTracks[0].codec;
+    if (verbose) {
+        console.log("[*] Container parsed successfully");
+        console.log(`[*] Video codec: ${codecLabel(videoCodec)}`);
+        console.log(`[*] Top-level mdats: ${mdats.length}`);
+        console.log(`[*] Audio samples: ${realCount} -> ${realCount + fakeCount}`);
+        console.log(`[*] Updating ${offsetTables.length} track offset table(s)`);
+        console.log(`[*] Layout stabilization passes: ${passes}`);
+        console.log(`[*] Embedding Method: ${METHOD}`);
+        console.log("[*] Preserving original duration and edit lists");
+        console.log("[*] Final layout validated");
+    }
+    return { version: VERSION, method: METHOD, fileSize, source, topBoxes, moovTop, mdats, targetMdat: selectedAudio.targetMdat, finalMoov, finalLayout, fakeCount, fakeSize, fakePayloadSize, factor, tracks, videoCodec, realAudioSamples: realCount, offsetTableCount: offsetTables.length, inputCo64, outputCo64, passes };
+}
+
+function assemblePatchedBuffer(plan, opts = {}) {
+    emitProgress(opts, 94, "Building final video...");
+    if (plan.finalLayout.outputSize > MAX_SAFE_BIG) throw new Mp4Error(`Final browser output exceeds safe ArrayBuffer size: ${plan.finalLayout.outputSize}`);
+    const outputLength = safeNumber(plan.finalLayout.outputSize, "final output size");
+    const parts = [];
+    for (const box of plan.topBoxes) {
+        if (box === plan.moovTop) { parts.push(plan.finalMoov); continue; }
+        if (box === plan.targetMdat) {
+            const rec = plan.finalLayout.layout.get(box);
+            parts.push(makeMdatHeader(rec));
+            parts.push(Buffer.from(plan.source.subarray(safeNumber(box.contentStart, "mdat payload start"), safeNumber(box.end, "mdat end"))));
+            parts.push(Buffer.alloc(safeNumber(plan.fakePayloadSize, "fake payload size"), 0));
+            continue;
+        }
+        parts.push(Buffer.from(plan.source.subarray(safeNumber(box.start, "top-level box start"), safeNumber(box.end, "top-level box end"))));
+    }
+    const output = Buffer.concat(parts);
+    if (output.byteLength !== outputLength) throw new Mp4Error(`Final file size mismatch: built ${output.byteLength}, planned ${outputLength}`);
+    return output;
 }
 
 export function patchAudioInflationMp4(input, opts = {}) {
-    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
-
-    // Keep the supplied v2.6 defaults exactly.
-    const factor = opts.factor ?? 8;
-    const baseSize = opts.baseSize ?? 80;
-    const seed = opts.seed ?? ri(0, 255);
-    const verbose = !!opts.verbose;
-
-    const boxes = parseBoxes(bytes);
-    const ftyp = boxes.find((b) => b.type === "ftyp");
-    const moov = boxes.find((b) => b.type === "moov");
-    const mdat = boxes.find((b) => b.type === "mdat");
-
-    if (!ftyp || !moov || !mdat) {
-        throw new Error(
-            "Missing required top-level boxes (ftyp / moov / mdat)",
-        );
-    }
-
-    let vTrak = null;
-    let aTrak = null;
-
-    for (const c of moov.children) {
-        if (c.type !== "trak") continue;
-        const hdlr = findDesc(c, ["mdia", "hdlr"]);
-        if (!hdlr) continue;
-        const handler = readType(bytes, hdlr.cStart + 8);
-        if (handler === "vide") vTrak = c;
-        else if (handler === "soun") aTrak = c;
-    }
-
-    if (!vTrak) throw new Error("No video track found");
-    if (!aTrak) throw new Error("No audio track found");
-
-    const aStbl = findDesc(aTrak, ["mdia", "minf", "stbl"]);
-    if (!aStbl) throw new Error("Missing audio stbl");
-
-    const aStsz = findChild(aStbl, "stsz");
-    const aChunkOffsets = findChild(aStbl, "stco") || findChild(aStbl, "co64");
-    const aStsc = findChild(aStbl, "stsc");
-    const aStts = findChild(aStbl, "stts");
-    const aMdhd = findDesc(aTrak, ["mdia", "mdhd"]);
-
-    if (!aStsz || !aChunkOffsets || !aStsc || !aMdhd) {
-        throw new Error("Missing audio stsz/stco/co64/stsc/mdhd");
-    }
-
-    const realASizes = parseStsz(aStsz, bytes);
-    const realAOffsets = parseChunkOffsets(aChunkOffsets, bytes);
-    const realARows = parseStsc(aStsc, bytes);
-    const realACount = realASizes.length;
-    const fakeACount = Math.floor(realACount * factor);
-
-    if (verbose) {
-        console.log(
-            `[*] Audio samples: ${realACount} → ${
-                realACount + fakeACount
-            } (×${factor})`,
-        );
-    }
-
-    const fakeASizes = Array.from(
-        { length: fakeACount },
-        () => baseSize + ri(0, 40),
-    );
-
-    const fakeAChunks = fakeASizes.map((sz, i) => {
-        const chunk = new Uint8Array(sz);
-        for (let j = 0; j < sz; j++) {
-            chunk[j] = ((seed + i * 23 + j * 41) ^ (i * 7 + j)) & 0xff;
-        }
-        return chunk;
-    });
-
-    const fakeAPayload = cat(fakeAChunks);
-    const fixed = new Map();
-
-    // stsz
-    {
-        const all = [...realASizes, ...fakeASizes];
-        const p = new Uint8Array(12 + all.length * 4);
-        writeU32(p, 0, 0);
-        writeU32(p, 4, 0);
-        writeU32(p, 8, all.length);
-        all.forEach((sz, i) => writeU32(p, 12 + i * 4, sz));
-        fixed.set(aStsz, makeBox("stsz", p));
-    }
-
-    // stsc
-    {
-        const rows = realARows.map((r) => [...r]);
-        if (rows.length === 0 || rows[rows.length - 1][1] !== 1) {
-            rows.push([realAOffsets.length + 1, 1, 1]);
-        }
-
-        const p = new Uint8Array(8 + rows.length * 12);
-        writeU32(p, 0, 0);
-        writeU32(p, 4, rows.length);
-        rows.forEach((r, i) => {
-            writeU32(p, 8 + i * 12, r[0]);
-            writeU32(p, 12 + i * 12, r[1]);
-            writeU32(p, 16 + i * 12, r[2]);
-        });
-        fixed.set(aStsc, makeBox("stsc", p));
-    }
-
-    // stts: appended samples use one tenth of the final real sample duration.
-    let aDelta = 1;
-    if (aStts) {
-        const entryCount = readU32(bytes, aStts.cStart + 4);
-        if (entryCount > 0) {
-            aDelta = Math.max(
-                1,
-                Math.floor(
-                    readU32(bytes, aStts.cStart + 12 + (entryCount - 1) * 8) /
-                        10,
-                ),
-            );
-        }
-    }
-
-    if (aStts && fakeACount > 0) {
-        const entryCount = readU32(bytes, aStts.cStart + 4);
-        const p = new Uint8Array(8 + (entryCount + 1) * 8);
-        p.set(sliceBytes(bytes, aStts.cStart, aStts.cStart + 4), 0);
-        writeU32(p, 4, entryCount + 1);
-
-        for (let i = 0; i < entryCount; i++) {
-            writeU32(p, 8 + i * 8, readU32(bytes, aStts.cStart + 8 + i * 8));
-            writeU32(p, 12 + i * 8, readU32(bytes, aStts.cStart + 12 + i * 8));
-        }
-
-        writeU32(p, 8 + entryCount * 8, fakeACount);
-        writeU32(p, 12 + entryCount * 8, aDelta);
-        fixed.set(aStts, makeBox("stts", p));
-    }
-
-    // Update media/movie duration. The supplied Node script wrote both values at
-    // offsets eight bytes too early and compared durations from different
-    // timescales. This browser port keeps the intended v2.6 behavior while using
-    // the correct FullBox offsets and timescale conversion.
-    const mdhdVersion = bytes[aMdhd.cStart];
-    const mdhdTimescaleOffset = mdhdVersion === 1 ? 20 : 12;
-    const mdhdDurationOffset = mdhdVersion === 1 ? 24 : 16;
-    const aTimescale = readU32(bytes, aMdhd.cStart + mdhdTimescaleOffset);
-    if (mdhdVersion === 1) {
-        throw new Error(
-            "64-bit mdhd duration is not supported by the v2.6 patcher",
-        );
-    }
-
-    const oldADur = readU32(bytes, aMdhd.cStart + mdhdDurationOffset);
-    const addedDur = fakeACount * aDelta;
-    const newADur = oldADur + addedDur;
-    if (!Number.isSafeInteger(newADur) || newADur > 0xffffffff) {
-        throw new Error("Audio duration exceeds the 32-bit mdhd limit");
-    }
-
-    const newAMdhd = sliceBytes(bytes, aMdhd.offset, aMdhd.end);
-    writeU32(newAMdhd, aMdhd.hs + mdhdDurationOffset, newADur);
-    fixed.set(aMdhd, newAMdhd);
-
-    const mvhd = findChild(moov, "mvhd");
-    if (mvhd) {
-        const mvhdVersion = bytes[mvhd.cStart];
-        const mvhdTimescaleOffset = mvhdVersion === 1 ? 20 : 12;
-        const mvhdDurationOffset = mvhdVersion === 1 ? 24 : 16;
-        if (mvhdVersion === 1) {
-            throw new Error(
-                "64-bit mvhd duration is not supported by the v2.6 patcher",
-            );
-        }
-
-        const movieTimescale = readU32(
-            bytes,
-            mvhd.cStart + mvhdTimescaleOffset,
-        );
-        const oldMovieDuration = readU32(
-            bytes,
-            mvhd.cStart + mvhdDurationOffset,
-        );
-        const audioMovieDuration = Math.ceil(
-            (newADur * movieTimescale) / aTimescale,
-        );
-        const newMovieDuration = Math.max(oldMovieDuration, audioMovieDuration);
-        if (
-            !Number.isSafeInteger(newMovieDuration) ||
-            newMovieDuration > 0xffffffff
-        ) {
-            throw new Error("Movie duration exceeds the 32-bit mvhd limit");
-        }
-
-        const newMvhd = sliceBytes(bytes, mvhd.offset, mvhd.end);
-        writeU32(newMvhd, mvhd.hs + mvhdDurationOffset, newMovieDuration);
-        fixed.set(mvhd, newMvhd);
-    }
-
-    function buildChunkOffsetRep(
-        offsetBox,
-        delta,
-        fakeOffsets = null,
-        forceCo64 = false,
-    ) {
-        const orig = parseChunkOffsets(offsetBox, bytes);
-        const isAudio = offsetBox === aChunkOffsets;
-        const appended = isAudio
-            ? fakeOffsets || Array(fakeACount).fill(0)
-            : [];
-
-        const candidateOffsets = orig.map((off) => off + delta);
-        candidateOffsets.push(...appended);
-
-        for (const off of candidateOffsets) {
-            if (!Number.isSafeInteger(off) || off < 0) {
-                throw new Error("Invalid rebuilt MP4 chunk offset");
-            }
-        }
-
-        const useCo64 =
-            forceCo64 ||
-            offsetBox.type === "co64" ||
-            candidateOffsets.some((off) => off > 0xffffffff);
-        const entrySize = useCo64 ? 8 : 4;
-        const p = new Uint8Array(8 + candidateOffsets.length * entrySize);
-        writeU32(p, 0, 0);
-        writeU32(p, 4, candidateOffsets.length);
-
-        candidateOffsets.forEach((off, i) => {
-            if (useCo64) writeU64(p, 8 + i * 8, off);
-            else writeU32(p, 8 + i * 4, off);
-        });
-
-        return makeBox(useCo64 ? "co64" : "stco", p);
-    }
-
-    const allChunkOffsetBoxes = [];
-    for (const t of moov.children) {
-        if (t.type !== "trak") continue;
-        const st = findDesc(t, ["mdia", "minf", "stbl"]);
-        if (!st) continue;
-        const offsets = findChild(st, "stco") || findChild(st, "co64");
-        if (offsets) allChunkOffsetBoxes.push(offsets);
-    }
-
-    function rebuild(box, rep) {
-        if (rep.has(box)) return rep.get(box);
-        if (box.children.length === 0) {
-            return sliceBytes(bytes, box.offset, box.end);
-        }
-
-        const parts = [sliceBytes(bytes, box.pStart, box.pEnd)];
-        for (const c of box.children) {
-            // Exact local v2.3 behavior: remove audio edit list container.
-            if (box === aTrak && c.type === "edts") continue;
-            parts.push(rebuild(c, rep));
-        }
-
-        return makeBox(box.type, cat(parts));
-    }
-
-    const otherTop = boxes
-        .filter((b) => !["ftyp", "moov", "mdat"].includes(b.type))
-        .map((b) => sliceBytes(bytes, b.offset, b.end));
-    const otherTopBytes = cat(otherTop);
-    const oMdatPayload = sliceBytes(bytes, mdat.cStart, mdat.end);
-
-    // Existing co64 tables stay co64. Any stco table that would overflow
-    // 32-bit after the moov/mdat move is promoted to co64. Re-measure until
-    // the table widths and resulting mdat position are stable.
-    const forceCo64 = new Set(
-        allChunkOffsetBoxes.filter((box) => box.type === "co64"),
-    );
-
-    let nStart = 0;
-    let delta = 0;
-    let fakeAOffsets = [];
-
-    for (
-        let iteration = 0;
-        iteration <= allChunkOffsetBoxes.length + 1;
-        iteration++
-    ) {
-        const measureRep = new Map(fixed);
-        for (const offsetBox of allChunkOffsetBoxes) {
-            measureRep.set(
-                offsetBox,
-                buildChunkOffsetRep(
-                    offsetBox,
-                    0,
-                    null,
-                    forceCo64.has(offsetBox),
-                ),
-            );
-        }
-
-        const measuredMoov = rebuild(moov, measureRep);
-        nStart =
-            ftyp.size + measuredMoov.byteLength + otherTopBytes.byteLength + 8;
-        delta = nStart - mdat.cStart;
-
-        fakeAOffsets = [];
-        let cursor = nStart + oMdatPayload.byteLength;
-        for (const sz of fakeASizes) {
-            fakeAOffsets.push(cursor);
-            cursor += sz;
-        }
-
-        let changed = false;
-        for (const offsetBox of allChunkOffsetBoxes) {
-            if (forceCo64.has(offsetBox)) continue;
-
-            const offsets = parseChunkOffsets(offsetBox, bytes).map(
-                (off) => off + delta,
-            );
-            if (offsetBox === aChunkOffsets) offsets.push(...fakeAOffsets);
-
-            if (offsets.some((off) => off > 0xffffffff)) {
-                forceCo64.add(offsetBox);
-                changed = true;
-            }
-        }
-
-        if (!changed) break;
-        if (iteration === allChunkOffsetBoxes.length + 1) {
-            throw new Error("Unable to stabilize stco/co64 layout");
-        }
-    }
-
-    const repFinal = new Map(fixed);
-    for (const offsetBox of allChunkOffsetBoxes) {
-        repFinal.set(
-            offsetBox,
-            buildChunkOffsetRep(
-                offsetBox,
-                delta,
-                offsetBox === aChunkOffsets ? fakeAOffsets : null,
-                forceCo64.has(offsetBox),
-            ),
-        );
-    }
-
-    const output = cat([
-        sliceBytes(bytes, ftyp.offset, ftyp.end),
-        rebuild(moov, repFinal),
-        ...otherTop,
-        makeBox("mdat", cat([oMdatPayload, fakeAPayload])),
-    ]);
-
+    const plan = buildUniversalPatchPlanFromBuffer(input, opts);
+    const output = assemblePatchedBuffer(plan, opts);
+    emitProgress(opts, 100, "Done");
+    const exact = output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength);
     return {
-        newBuffer: output.buffer.slice(
-            output.byteOffset,
-            output.byteOffset + output.byteLength,
-        ),
-        newBytes: output,
-        multiplier: factor,
-        factor,
-        baseSize,
-        seed,
-        fakeAudioCount: fakeACount,
-        audioDelta: aDelta,
-        addedAudioDuration: addedDur,
-        audioTimescale: aTimescale,
-        version: "2.6",
-        parser: "local-v2.6-co64-camera-safe",
-        co64: {
-            inputTables: allChunkOffsetBoxes.filter(
-                (box) => box.type === "co64",
-            ).length,
-            outputTables: forceCo64.size,
-            supported: true,
-        },
+        newBuffer: exact, newBytes: new Uint8Array(exact), buffer: exact,
+        multiplier: plan.factor, factor: plan.factor, baseSize: opts.baseSize ?? 80, seed: opts.seed ?? 0,
+        fakeAudioCount: plan.fakeCount, audioDelta: 0, addedAudioDuration: 0, audioTimescale: 0,
+        version: VERSION, parser: "universal-v3.1-browser-relocation", method: METHOD,
+        videoCodec: codecLabel(plan.videoCodec), trackOffsetTables: plan.offsetTableCount, stabilizationPasses: plan.passes,
+        co64: { inputTables: plan.inputCo64, outputTables: plan.outputCo64, supported: true, promoted: Math.max(0, plan.outputCo64 - plan.inputCo64) },
     };
 }
+
+export { VERSION, METHOD, Mp4Error, parseStco, parseCo64, buildStco, buildCo64, buildUniversalPatchPlanFromBuffer };

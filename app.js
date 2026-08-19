@@ -2904,9 +2904,10 @@ function getVideoDurationAndResolution(file) {
     });
 }
 
-async function patchSingleFile(item) {
+async function patchSingleFile(item, { onProgress } = {}) {
     if (isCancelled) throw new Error("Cancelled");
 
+    onProgress?.({ percent: 2, stage: "Reading video..." });
     const inputBuffer = await item.file.arrayBuffer();
     if (isCancelled) throw new Error("Cancelled");
 
@@ -2920,17 +2921,17 @@ async function patchSingleFile(item) {
         logMessage("  Source: original MP4/MOV file", "info");
     }
 
-    // The only processing step: run the audio-inflation MP4 patcher.
-    // No FFmpeg, frame interpolation, resizing, transcoding, normalization,
-    // bitrate conversion, FPS validation, or other compression pipeline.
-    logMessage("  Applying audio-inflation patch v2.6 (tiny sample duration + synchronized MP4 duration)...", "info");
-    const patchResult = await patchAudioInflationInWorker(inputBuffer);
+    // Production processing path: universal browser/Web Worker MP4 patcher.
+    // Encoded video/audio packets and the original timeline are preserved.
+    logMessage("  Using universal MP4/MOV audio-inflation engine...", "info");
+    const patchResult = await patchAudioInflationInWorker(inputBuffer, { onProgress });
     if (isCancelled) throw new Error("Cancelled");
 
     logMessage(
-        `  Audio inflation v${patchResult.version || "2.6"} complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} added samples, delta ${patchResult.audioDelta || 1}).`,
+        `  Universal patch v${patchResult.version || "3"} complete (${patchResult.multiplier}x, ${patchResult.fakeAudioCount.toLocaleString()} fake samples, duration preserved, ${patchResult.trackOffsetTables || 0} offset table(s), co64 ${patchResult.co64?.inputTables ?? 0}→${patchResult.co64?.outputTables ?? 0}).`,
         "success",
     );
+    logMessage(`  Method metadata: ${patchResult.method || "theziessmethod.site"}`, "success");
 
     let movThumbnail = null;
     try {
@@ -2993,7 +2994,7 @@ clearBtn.addEventListener("click", async (event) => {
     event.stopPropagation();
     if (currentFlowState === "patching") {
         isCancelled = true;
-        logMessage("Cancelling active interpolation progress...", "warning");
+        logMessage("Cancelling active video patch...", "warning");
         
         return;
     }
@@ -3146,7 +3147,19 @@ patchBtn.addEventListener("click", async () => {
                 );
             }
 
-            const result = await patchSingleFile(item);
+            const fileProgressBase = (i / pendingItems.length) * 100;
+            const fileProgressSpan = 100 / pendingItems.length;
+            let lastPatchStage = "";
+            const result = await patchSingleFile(item, {
+                onProgress: ({ percent, stage }) => {
+                    const localPercent = Math.max(0, Math.min(100, Number(percent) || 0));
+                    setProgress(fileProgressBase + (localPercent / 100) * fileProgressSpan);
+                    if (stage && stage !== lastPatchStage) {
+                        logMessage(`  ${stage}`, stage === "Done" ? "success" : "info");
+                        lastPatchStage = stage;
+                    }
+                },
+            });
             if (isCancelled) {
                 item.status = "pending";
                 break;
@@ -3294,7 +3307,7 @@ patchBtn.addEventListener("click", async () => {
         releaseWakeLock();
         setLogCopyVisible(false);
         clearBtn.innerText = "Clear";
-        logMessage("Interpolation progress cancelled by user.", "warning");
+        logMessage("Video patch cancelled by user.", "warning");
         renderFileList();
         updatePatchButton();
         // Remix Icon CSS handles rendering
@@ -3303,7 +3316,8 @@ patchBtn.addEventListener("click", async () => {
 
     currentFlowState =
         successCount === pendingItems.length ? "completed" : "idle";
-    setProgress(100);
+    if (successCount === pendingItems.length) setProgress(100);
+    else setProgress(Math.round((successCount / pendingItems.length) * 100));
     releaseWakeLock();
     setLogCopyVisible(true);
     logMessage(

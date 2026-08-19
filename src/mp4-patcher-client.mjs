@@ -4,12 +4,14 @@ const pending = new Map();
 
 function getWorker() {
     if (worker) return worker;
-    worker = new Worker(new URL("./mp4-patcher-worker.mjs", import.meta.url), {
-        type: "module",
-    });
+    worker = new Worker(new URL("./mp4-patcher-worker.mjs", import.meta.url), { type: "module" });
     worker.onmessage = ({ data }) => {
         const task = pending.get(data?.id);
         if (!task) return;
+        if (data?.progress) {
+            task.onProgress?.({ percent: Number(data.percent) || 0, stage: String(data.stage || "Processing video...") });
+            return;
+        }
         pending.delete(data.id);
         if (data.ok) task.resolve(data);
         else task.reject(new Error(data.error || "MP4 patch failed"));
@@ -27,9 +29,10 @@ function getWorker() {
 export function patchAudioInflationInWorker(buffer, options = {}) {
     const transferable = buffer.slice(0);
     const id = ++sequence;
+    const { onProgress, ...workerOptions } = options || {};
     return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        getWorker().postMessage({ id, buffer: transferable, options }, [transferable]);
+        pending.set(id, { resolve, reject, onProgress });
+        getWorker().postMessage({ id, buffer: transferable, options: workerOptions }, [transferable]);
     });
 }
 

@@ -355,18 +355,28 @@ npm run dev
 Vite serves the frontend; Vercel Functions should be tested with the Vercel
 local runtime when OAuth/API endpoints are required.
 
-### Audio inflation v2.6 CLI
+### Universal MP4/MOV audio-inflation v3.1
 
-The website and command-line tool share the same v2.6 MP4 implementation. To
-process a local file from Node.js:
+The production website and command-line utility share one universal patch core:
+
+`app.js → src/mp4-patcher-client.mjs → src/mp4-patcher-worker.mjs → src/mp4-audio-inflate.mjs`
+
+The browser worker supports `stco` and `co64` (with BigInt), automatic
+`stco → co64` promotion, multiple `mdat` relocation, 32/64-bit box sizes,
+`size=0` boxes, `stsz`/`stz2`, metadata preservation, and method metadata
+`theziessmethod.site`. Original movie/track/media durations and `edts/elst` are
+not extended or removed by the fake samples. Fragmented MP4 (`moof`/`mvex`) is
+rejected cleanly instead of being processed with classic sample-table logic.
+
+To process a local compatible MP4/MOV through the exact same production core:
 
 ```bash
-npm run patch:audio -- --factor 8 --base-size 80 input.mp4 output.mp4
+npm run patch:audio -- --factor 8 --verbose input.mp4 output.mp4
 ```
 
-`--seed 0-255` makes the generated payload repeatable and `--verbose` prints
-the audio sample counts. If the output path is omitted, the CLI writes an
-`_v26.mp4` file beside the input.
+If the output path is omitted, the CLI writes an `_patched` file beside the
+input. The CLI is only a Node wrapper; the patch implementation itself remains
+in `src/mp4-audio-inflate.mjs` so there is one production engine.
 
 ### Vercel deployment
 

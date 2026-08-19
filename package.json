@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "npm run generate-changelog && vite build",
     "preview": "vite preview",
-    "patch:audio": "node scripts/audio-inflation-v2.6.mjs",
+    "patch:audio": "node scripts/audio-inflation-v3.mjs",
     "test": "vitest run",
     "lint": "biome check .",
     "cleanup-api": "node scripts/cleanup-vercel-functions.mjs"
