@@ -355,6 +355,19 @@ npm run dev
 Vite serves the frontend; Vercel Functions should be tested with the Vercel
 local runtime when OAuth/API endpoints are required.
 
+### Audio inflation v2.6 CLI
+
+The website and command-line tool share the same v2.6 MP4 implementation. To
+process a local file from Node.js:
+
+```bash
+npm run patch:audio -- --factor 8 --base-size 80 input.mp4 output.mp4
+```
+
+`--seed 0-255` makes the generated payload repeatable and `--verbose` prints
+the audio sample counts. If the output path is omitted, the CLI writes an
+`_v26.mp4` file beside the input.
+
 ### Vercel deployment
 
 1. Add all variables from `.env.example` in **Vercel → Project → Settings →
