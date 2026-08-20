@@ -355,7 +355,7 @@ npm run dev
 Vite serves the frontend; Vercel Functions should be tested with the Vercel
 local runtime when OAuth/API endpoints are required.
 
-### Universal MP4/MOV audio-inflation v3.1
+### Universal MP4/MOV audio-inflation v3.1.1
 
 The production website and command-line utility share one universal patch core:
 
@@ -367,6 +367,8 @@ The browser worker supports `stco` and `co64` (with BigInt), automatic
 `theziessmethod.site`. Original movie/track/media durations and `edts/elst` are
 not extended or removed by the fake samples. Fragmented MP4 (`moof`/`mvex`) is
 rejected cleanly instead of being processed with classic sample-table logic.
+Version 3.1.1 also avoids zero-duration `stts` entries and preserves the audio
+timeline tick-for-tick for better compatibility with mobile MP4 demuxers.
 
 To process a local compatible MP4/MOV through the exact same production core:
 

@@ -69,25 +69,23 @@ function audioTables(input) {
     throw new Error("Audio track not found");
 }
 
-describe("audio inflation v2.6", () => {
-    it("uses the supplied defaults and synchronizes the audio duration", () => {
+describe("audio inflation duration preservation", () => {
+    it("uses the supplied defaults without extending the audio duration", () => {
         const input = new Uint8Array(readFileSync(fixturePath));
         const before = audioTables(input);
         const result = patchAudioInflationMp4(input, { seed: 7 });
         const after = audioTables(result.newBytes);
-        const expectedDelta = Math.max(1, Math.floor(before.finalDelta / 10));
 
-        expect(result.version).toBe("2.6");
+        expect(result.version).toBe("3.1.1");
         expect(result.factor).toBe(8);
         expect(result.baseSize).toBe(80);
         expect(result.fakeAudioCount).toBe(before.sampleCount * 8);
-        expect(result.audioDelta).toBe(expectedDelta);
+        expect(result.audioDelta).toBe(0);
         expect(after.sampleCount).toBe(
             before.sampleCount + result.fakeAudioCount,
         );
-        expect(after.duration).toBe(
-            before.duration + result.fakeAudioCount * expectedDelta,
-        );
+        expect(after.duration).toBe(before.duration);
+        expect(after.finalDelta).toBe(1);
     });
 
     it("produces an MP4 container that ffprobe can read", () => {

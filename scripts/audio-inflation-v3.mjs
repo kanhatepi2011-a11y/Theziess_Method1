@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Theziess Universal MP4/MOV Audio-Inflation Patcher — v3.0.0
+ * Theziess Universal MP4/MOV Audio-Inflation Patcher — v3.0.1
  *
  * Goals:
  *   - Generic ISO BMFF/MP4 parser for non-fragmented files.
@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '3.0.0';
+const VERSION = '3.0.1';
 const METHOD = 'theziessmethod.site';
 const UINT32_MAX = 0xFFFFFFFFn;
 const UINT64_MAX = 0xFFFFFFFFFFFFFFFFn;
@@ -573,16 +573,103 @@ function parseStts(box, buf) {
 
 function buildInflatedStts(sttsInfo, fakeCount) {
   if (fakeCount === 0) return null;
-  const rows = sttsInfo.rows.map((r) => ({ ...r }));
-  // Zero delta is intentional for this method: the extra sample-table entries
-  // exist without extending the declared/intended media timeline.
-  if (rows.length && rows[rows.length - 1].sampleDelta === 0) {
-    const merged = BigInt(rows[rows.length - 1].sampleCount) + BigInt(fakeCount);
-    if (merged > UINT32_MAX) throw new Mp4Error('stts zero-delta run exceeds uint32 sample_count');
-    rows[rows.length - 1].sampleCount = Number(merged);
-  } else {
-    rows.push({ sampleCount: fakeCount, sampleDelta: 0 });
+
+  // Never write sample_delta=0 for fake audio samples. Some mobile demuxers
+  // interpret those entries using the codec's normal frame duration, making
+  // a short clip appear to last for minutes.
+  //
+  // Every fake sample receives the smallest legal duration (one tick), and
+  // the same number of ticks is borrowed from the real audio timing rows.
+  // The final stts duration therefore remains identical to the source.
+  const requiredDonation = BigInt(fakeCount);
+  let capacity = 0n;
+  for (const r of sttsInfo.rows) {
+    if (r.sampleDelta > 1) {
+      capacity += BigInt(r.sampleCount) * BigInt(r.sampleDelta - 1);
+    }
   }
+
+  if (capacity < requiredDonation) {
+    throw new Mp4Error(
+      `Cannot inflate audio without changing duration: fake samples need ${requiredDonation} timing tick(s), ` +
+      `but original stts can safely donate only ${capacity}. Lower --factor.`,
+    );
+  }
+
+  let remaining = requiredDonation;
+  const rows = [];
+
+  const pushRow = (sampleCount, sampleDelta) => {
+    if (sampleCount <= 0) return;
+    if (!Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > 0xFFFFFFFF) {
+      throw new Mp4Error(`Invalid rebuilt stts sample_count: ${sampleCount}`);
+    }
+    if (!Number.isInteger(sampleDelta) || sampleDelta < 1 || sampleDelta > 0xFFFFFFFF) {
+      throw new Mp4Error(`Invalid rebuilt stts sample_delta: ${sampleDelta}`);
+    }
+
+    const last = rows[rows.length - 1];
+    if (last && last.sampleDelta === sampleDelta) {
+      const merged = BigInt(last.sampleCount) + BigInt(sampleCount);
+      if (merged <= UINT32_MAX) {
+        last.sampleCount = Number(merged);
+        return;
+      }
+    }
+    rows.push({ sampleCount, sampleDelta });
+  };
+
+  // Spread the tiny reduction over the original timing rows. For normal AAC
+  // this changes each real sample by only a few ticks.
+  for (const src of sttsInfo.rows) {
+    const count = BigInt(src.sampleCount);
+    const delta = BigInt(src.sampleDelta);
+
+    if (remaining === 0n || delta <= 1n) {
+      pushRow(src.sampleCount, src.sampleDelta);
+      continue;
+    }
+
+    const rowCapacity = count * (delta - 1n);
+    const take = remaining < rowCapacity ? remaining : rowCapacity;
+    const q = take / count;
+    const r = take % count;
+    const baseDelta = delta - q;
+
+    if (r > 0n) {
+      const lowerDelta = baseDelta - 1n;
+      if (lowerDelta < 1n) throw new Mp4Error('Internal stts duration-preservation underflow');
+      pushRow(Number(r), Number(lowerDelta));
+    }
+    const rest = count - r;
+    if (rest > 0n) pushRow(Number(rest), Number(baseDelta));
+
+    remaining -= take;
+  }
+
+  if (remaining !== 0n) {
+    throw new Mp4Error(`Internal stts duration-preservation error: ${remaining} tick(s) not allocated`);
+  }
+
+  pushRow(fakeCount, 1);
+
+  let finalSamples = 0n;
+  let finalDuration = 0n;
+  for (const r of rows) {
+    finalSamples += BigInt(r.sampleCount);
+    finalDuration += BigInt(r.sampleCount) * BigInt(r.sampleDelta);
+  }
+
+  const expectedSamples = sttsInfo.totalSamples + BigInt(fakeCount);
+  if (finalSamples !== expectedSamples) {
+    throw new Mp4Error(`Rebuilt stts sample mismatch: ${finalSamples} != ${expectedSamples}`);
+  }
+  if (finalDuration !== sttsInfo.totalDuration) {
+    throw new Mp4Error(
+      `Rebuilt stts duration mismatch: ${finalDuration} != original ${sttsInfo.totalDuration}`,
+    );
+  }
+
   const p = Buffer.allocUnsafe(8 + rows.length * 8);
   sttsInfo.versionFlags.copy(p, 0, 0, 4);
   p.writeUInt32BE(rows.length, 4);
@@ -1098,6 +1185,22 @@ function inspectFinalAudioTables(selectedAudio, fakeCount, replacements, offsetR
   if (finalSttsSamples !== finalSampleCount) {
     throw new Mp4Error(`Final stts sample count mismatch: stts=${finalSttsSamples}, stsz=${finalSampleCount}`);
   }
+
+  const rebuiltStts = replacements.get(selectedAudio.stts);
+  if (!rebuiltStts) throw new Mp4Error('Final audio stts replacement is missing');
+  const rebuiltRoot = readBufferBox(rebuiltStts, 0, rebuiltStts.length, 'generated-stts', 0n);
+  const rebuiltInfo = parseStts(rebuiltRoot, rebuiltStts);
+  if (rebuiltInfo.totalDuration !== selectedAudio.sttsInfo.totalDuration) {
+    throw new Mp4Error(
+      `Final audio duration changed: original stts=${selectedAudio.sttsInfo.totalDuration}, ` +
+      `output stts=${rebuiltInfo.totalDuration}`,
+    );
+  }
+  if (rebuiltInfo.totalSamples !== finalSampleCount) {
+    throw new Mp4Error(
+      `Final audio sample count mismatch after rebuild: stts=${rebuiltInfo.totalSamples}, stsz=${finalSampleCount}`,
+    );
+  }
   if (!replacements.has(selectedAudio.sizeBox) || !replacements.has(selectedAudio.stsc) || !replacements.has(selectedAudio.stts)) {
     throw new Mp4Error('Final audio sample-table replacements are incomplete');
   }
@@ -1310,7 +1413,8 @@ function buildUniversalPatchPlan(inputPath, opts = {}) {
       console.log(`[*] Layout stabilization passes: ${passes}`);
       if (outputCo64 > inputCo64) console.log(`[*] Promoted ${outputCo64 - inputCo64} stco table(s) -> co64`);
       console.log(`[*] Embedding Method: ${METHOD}`);
-      console.log(`[*] Preserving original duration and edit lists`);
+      console.log(`[*] Preserving original duration exactly (no zero-delta stts samples)`);
+      console.log(`[*] Preserving original edit lists`);
       console.log(`[*] Final layout validated`);
     }
 
