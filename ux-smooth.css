@@ -1036,6 +1036,331 @@ body[data-app-view="check"] .panel-video-check:not([hidden]) {
   }
 }
 
+/* Real compression percentage + smooth determinate progress */
+.compress-progress-panel {
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate3d(0, -7px, 0);
+  transition:
+    max-height 420ms var(--ux-ease-premium),
+    margin-top 320ms var(--ux-ease-premium),
+    opacity 260ms ease,
+    transform 360ms var(--ux-ease-premium),
+    visibility 0s linear 420ms;
+}
+
+.compress-progress-panel.active {
+  max-height: 92px;
+  margin-top: 14px;
+  opacity: 1;
+  visibility: visible;
+  transform: translate3d(0, 0, 0);
+  transition-delay: 0s;
+}
+
+.compress-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  margin-bottom: 9px;
+}
+
+.compress-progress-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #d8cced;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.compress-progress-stage > i {
+  flex: 0 0 auto;
+  color: #67e8f9;
+  font-size: 17px;
+  filter: drop-shadow(0 0 8px rgba(34, 211, 238, .48));
+  animation: compress-progress-spin 900ms linear infinite;
+}
+
+.compress-progress-stage > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compress-progress-percent {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  min-width: 62px;
+  min-height: 31px;
+  padding: 4px 10px;
+  border: 1px solid rgba(103, 232, 249, .34);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, .22), rgba(34, 211, 238, .12));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .10), 0 0 20px rgba(34, 211, 238, .08);
+  color: #ecfeff;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+
+#compressProgressPanel .progress-track {
+  display: block;
+  position: relative;
+  height: 11px;
+  overflow: hidden;
+  opacity: 1;
+  border: 1px solid rgba(192, 132, 252, .26);
+  border-radius: 999px;
+  background: rgba(4, 1, 12, .82);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .46), 0 0 0 1px rgba(255, 255, 255, .018);
+}
+
+#compressProgressPanel .progress-bar {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7c3aed 0%, #c084fc 48%, #22d3ee 100%);
+  box-shadow: 0 0 16px rgba(168, 85, 247, .60), 0 0 12px rgba(34, 211, 238, .30);
+  transform: scaleX(var(--progress-scale, 0));
+  transform-origin: left center;
+  transition: transform 520ms cubic-bezier(.22, 1, .36, 1);
+  will-change: transform;
+}
+
+#compressProgressPanel .progress-bar::after,
+.file-item.status-processing .file-item-progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 10%, rgba(255, 255, 255, .58) 48%, transparent 82%);
+  transform: translate3d(-125%, 0, 0);
+  animation: compress-progress-shine 1.35s ease-in-out infinite;
+}
+
+.file-item-progress {
+  height: 7px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(2, 1, 8, .84);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .54);
+}
+
+.file-item-progress-bar,
+.file-item.status-processing .file-item-progress-bar {
+  position: relative;
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #c084fc 52%, #22d3ee);
+  transform: scaleX(var(--file-progress-scale, 0));
+  transform-origin: left center;
+  transition: transform 480ms cubic-bezier(.22, 1, .36, 1), background-color 180ms ease;
+  animation: none;
+  will-change: transform;
+}
+
+.file-item.status-success .file-item-progress-bar,
+.file-item.status-error .file-item-progress-bar {
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-item .file-item-progress-bar,
+  .file-item.status-processing .file-item-progress-bar {
+    transition-duration: .01ms !important;
+  }
+}
+
+/* Local video-quality details. */
+
+.file-quality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 5px;
+  min-width: 0;
+  margin-top: 7px;
+}
+
+.file-quality-chip {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 35px;
+  padding: 5px 6px;
+  border: 1px solid rgba(192, 132, 252, .14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .025);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+}
+
+.file-quality-chip > i {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: #67e8f9;
+  background: rgba(34, 211, 238, .08);
+  font-size: 12px;
+}
+
+.file-quality-chip > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.file-quality-chip small,
+.file-quality-chip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-quality-chip small {
+  color: #8f829f;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.file-quality-chip strong {
+  margin-top: 2px;
+  color: #eee7fa;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-quality-loading {
+  display: inline-flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid rgba(103, 232, 249, .14);
+  border-radius: 9px;
+  background: rgba(34, 211, 238, .035);
+  color: #a99eb9;
+  font-size: 9px;
+}
+
+.file-quality-loading > i {
+  color: #67e8f9;
+  font-size: 13px;
+  animation: compress-progress-spin 900ms linear infinite;
+}
+
+.file-quality-grid + .file-item-progress {
+  margin-top: 8px;
+}
+
+@media (max-width: 520px) {
+  .drop-zone {
+    min-height: 185px;
+    padding: 17px 10px;
+    gap: 8px;
+    border-radius: 19px;
+  }
+
+  .brutalist-upload-box {
+    width: 56px;
+    height: 56px;
+    border-radius: 17px;
+    font-size: 26px;
+  }
+
+  .upload-feature-chips { gap: 4px; }
+  .upload-feature-chips span { padding: 4px 6px; font-size: 8px; }
+  .drop-text-primary { font-size: 16px; }
+  .drop-text-secondary { font-size: 10px; }
+
+  .file-quality-grid {
+    grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+    gap: 4px;
+  }
+
+  .file-quality-chip {
+    grid-template-columns: 18px minmax(0, 1fr);
+    min-height: 32px;
+    padding: 4px 5px;
+  }
+
+  .file-quality-chip > i {
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+  }
+
+  .file-quality-chip small { font-size: 6.5px; }
+  .file-quality-chip strong { font-size: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-quality-loading > i { animation: none !important; }
+}
+
+.file-item.status-processing .file-badge {
+  min-width: 54px;
+  border-color: rgba(103, 232, 249, .34);
+  background: rgba(34, 211, 238, .10);
+  color: #a5f3fc;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.file-item.status-processing .file-item-meta {
+  overflow: hidden;
+  color: #b8aeca;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes compress-progress-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes compress-progress-shine {
+  0%, 18% { transform: translate3d(-125%, 0, 0); }
+  78%, 100% { transform: translate3d(125%, 0, 0); }
+}
+
+@media (max-width: 520px) {
+  .compress-progress-panel.active { margin-top: 12px; }
+  .compress-progress-heading { gap: 9px; margin-bottom: 8px; }
+  .compress-progress-stage { font-size: 11px; }
+  .compress-progress-percent { min-width: 56px; min-height: 29px; font-size: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compress-progress-panel,
+  #compressProgressPanel .progress-bar,
+  .file-item-progress-bar,
+  .file-item.status-processing .file-item-progress-bar {
+    transition-duration: .01ms !important;
+  }
+
+  .compress-progress-stage > i,
+  #compressProgressPanel .progress-bar::after,
+  .file-item.status-processing .file-item-progress-bar::after {
+    animation: none !important;
+  }
+}
+
 /* ---------- Admin-controlled maintenance mode ---------- */
 
 html.maintenance-active,
@@ -2295,5 +2620,403 @@ button:disabled,
   .app-bottom-nav,
   .plan-card {
     border: 1px solid CanvasText;
+  }
+}
+
+/* Keep file rows determinate after the legacy progress rules above. */
+.file-item .file-item-progress-bar,
+.file-item.status-processing .file-item-progress-bar {
+  position: relative;
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  transform: scaleX(var(--file-progress-scale, 0));
+  transform-origin: left center;
+  transition: transform 480ms cubic-bezier(.22, 1, .36, 1), background-color 180ms ease;
+  animation: none;
+  will-change: transform;
+}
+
+.file-item.status-success .file-item-progress-bar,
+.file-item.status-error .file-item-progress-bar {
+  transform: scaleX(1);
+}
+
+/* The file row is now the single visible compression progress surface. */
+.file-item .file-item-progress {
+  height: 10px;
+  margin-top: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(192, 132, 252, .18);
+  border-radius: 999px;
+  background: rgba(3, 1, 10, .90);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, .56);
+}
+
+.file-item.status-processing .file-item-progress {
+  border-color: rgba(103, 232, 249, .26);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, .56), 0 0 12px rgba(34, 211, 238, .08);
+}
+
+.file-item .file-item-progress-bar,
+.file-item.status-processing .file-item-progress-bar {
+  background: linear-gradient(90deg, #a855f7 0%, #c084fc 48%, #22d3ee 100%);
+  box-shadow: 0 0 16px rgba(168, 85, 247, .52), 0 0 10px rgba(34, 211, 238, .26);
+}
+
+.file-item.status-success .file-badge {
+  min-width: 76px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-item .file-item-progress-bar,
+  .file-item.status-processing .file-item-progress-bar {
+    transition-duration: .01ms !important;
+  }
+}
+
+/* Compact upload area: authoritative final size. */
+.drop-zone {
+  min-height: 210px;
+  padding: 22px 16px;
+  gap: 11px;
+  border-radius: 22px;
+}
+
+.brutalist-upload-box {
+  width: 64px;
+  height: 64px;
+  border-radius: 19px;
+  font-size: 30px;
+  box-shadow: 0 11px 28px rgba(139, 92, 246, .27), inset 0 1px 1px rgba(255, 255, 255, .36);
+}
+
+.upload-feature-chips { margin-top: 2px; gap: 5px; }
+.upload-feature-chips span { padding: 5px 8px; font-size: 9px; }
+.drop-text-primary { margin-top: 1px; font-size: clamp(17px, 2.5vw, 21px); }
+.drop-text-secondary { margin-top: 3px; font-size: 11px; }
+
+@media (max-width: 520px) {
+  .drop-zone {
+    min-height: 185px;
+    padding: 17px 10px;
+    gap: 8px;
+    border-radius: 19px;
+  }
+
+  .brutalist-upload-box {
+    width: 56px;
+    height: 56px;
+    border-radius: 17px;
+    font-size: 26px;
+  }
+
+  .upload-feature-chips { gap: 4px; }
+  .upload-feature-chips span { padding: 4px 6px; font-size: 8px; }
+  .drop-text-primary { font-size: 16px; }
+  .drop-text-secondary { font-size: 10px; }
+}
+
+/* Video quality belongs under the drop area, separate from the queue row. */
+.selected-video-quality {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid rgba(103, 232, 249, .20);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(23, 10, 42, .78), rgba(7, 3, 17, .84)),
+    rgba(10, 4, 21, .84);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035), 0 10px 28px rgba(0, 0, 0, .18);
+}
+
+.selected-video-quality[hidden] {
+  display: none !important;
+}
+
+.selected-video-quality-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.selected-video-quality-header .icon-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #f4eaff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.selected-video-quality-header .icon-heading > i {
+  color: #67e8f9;
+  font-size: 16px;
+}
+
+.selected-video-quality-header > small {
+  flex: 0 0 auto;
+  color: #9a8ca9;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.selected-video-quality-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.selected-video-quality-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(192, 132, 252, .16);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.selected-video-quality-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #ddd4e8;
+}
+
+.selected-video-quality-name > i {
+  flex: 0 0 auto;
+  color: #c084fc;
+  font-size: 14px;
+}
+
+.selected-video-quality-name > strong {
+  overflow: hidden;
+  min-width: 0;
+  color: #eee7fa;
+  font-size: 10px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-video-quality .file-quality-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  margin-top: 0;
+}
+
+.selected-video-quality .file-quality-chip {
+  min-height: 38px;
+  padding: 6px 7px;
+  border-color: rgba(192, 132, 252, .15);
+  background: rgba(5, 2, 13, .46);
+}
+
+.selected-video-quality .file-quality-chip small {
+  font-size: 7px;
+}
+
+.selected-video-quality .file-quality-chip strong {
+  font-size: 9px;
+}
+
+@media (max-width: 620px) {
+  .selected-video-quality {
+    gap: 8px;
+    padding: 10px;
+    border-radius: 15px;
+  }
+
+  .selected-video-quality-card {
+    padding: 8px;
+  }
+
+  .selected-video-quality .file-quality-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+}
+
+/* Real frame preview plus an orderly phone-first quality layout. */
+.selected-video-quality-content {
+  display: grid;
+  grid-template-columns: minmax(140px, 170px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.selected-video-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 96px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(103, 232, 249, .22);
+  border-radius: 11px;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(34, 211, 238, .10), transparent 48%),
+    #05020c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.selected-video-preview > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 96px;
+  object-fit: contain;
+  background: #030107;
+}
+
+.selected-video-preview > figcaption {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 3px 5px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 6px;
+  color: #e9e2f3;
+  background: rgba(4, 1, 10, .76);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.selected-video-preview-state {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 12px;
+  color: #9f91ae;
+  text-align: center;
+}
+
+.selected-video-preview-state > i {
+  color: #67e8f9;
+  font-size: 21px;
+}
+
+.selected-video-preview-state > small {
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.selected-video-preview-state > .ri-loader-4-line {
+  animation: compress-progress-spin 900ms linear infinite;
+}
+
+.selected-video-quality-content > .file-quality-grid {
+  align-content: stretch;
+}
+
+@media (max-width: 760px) {
+  .drop-zone {
+    min-height: 168px;
+    padding: 14px 9px;
+    gap: 7px;
+    border-radius: 18px;
+  }
+
+  .brutalist-upload-box {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 24px;
+  }
+
+  .upload-feature-chips {
+    gap: 4px;
+    margin-top: 0;
+  }
+
+  .upload-feature-chips span {
+    padding: 4px 6px;
+    font-size: 7.5px;
+  }
+
+  .drop-text-primary {
+    margin-top: 0;
+    font-size: 15px;
+  }
+
+  .drop-text-secondary {
+    margin-top: 1px;
+    font-size: 9px;
+  }
+
+  .selected-video-quality {
+    gap: 8px;
+    padding: 9px;
+    border-radius: 15px;
+  }
+
+  .selected-video-quality-card {
+    gap: 7px;
+    padding: 8px;
+    border-radius: 12px;
+  }
+
+  .selected-video-quality-content {
+    grid-template-columns: 126px minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .selected-video-quality .file-quality-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .selected-video-quality .file-quality-chip {
+    min-height: 40px;
+    padding: 5px 6px;
+  }
+
+  .selected-video-quality .file-quality-chip small {
+    font-size: 6.5px;
+  }
+
+  .selected-video-quality .file-quality-chip strong {
+    font-size: 8.5px;
+  }
+}
+
+@media (max-width: 430px) {
+  .selected-video-quality-content {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-video-preview,
+  .selected-video-preview > img {
+    min-height: 150px;
+    max-height: 180px;
+  }
+
+  .selected-video-preview {
+    aspect-ratio: 16 / 9;
+  }
+
+  .selected-video-quality-name > strong {
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selected-video-preview-state > .ri-loader-4-line {
+    animation: none !important;
   }
 }

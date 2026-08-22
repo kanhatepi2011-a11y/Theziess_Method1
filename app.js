@@ -23,10 +23,9 @@ import {
 const FRAME_CAPTURE_TIMEOUT_MS = 5000;
 const METADATA_TIMEOUT_MS = 10000;
 const MAX_THUMBNAIL_DIMENSION = 120;
+const QUALITY_PREVIEW_MAX_DIMENSION = 420;
 const MOBILE_BREAKPOINT = 900;
 const DOWNLOAD_REVOKE_DELAY_MS = 1000;
-const PROGRESS_HIDE_DELAY_MS = 800;
-const PROGRESS_FADE_DURATION_MS = 400;
 const DOWNLOAD_INTERVAL_MS = 300;
 const PATCH_INTERVAL_MS = 600;
 const MOBILE_SCROLL_DELAY_MS = 150;
@@ -369,8 +368,6 @@ const fileInput = document.getElementById("fileInput");
 const patchBtn = document.getElementById("patchBtn");
 const clearBtn = document.getElementById("clearBtn");
 const dropZone = document.getElementById("dropZone");
-const progressBar = document.getElementById("progressBar");
-const progressTrack = document.getElementById("progressTrack");
 const fileListEl = document.getElementById("fileList");
 const historyList = document.getElementById("historyList");
 const historyBadge = document.getElementById("historyBadge");
@@ -378,6 +375,9 @@ const historyHeader = document.getElementById("historyHeader");
 const historySection = document.getElementById("historySection");
 const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 const queueAndActionsWrapper = document.querySelector(".queue-and-actions-wrapper");
+const selectedVideoQuality = document.getElementById("selectedVideoQuality");
+const selectedVideoQualityList = document.getElementById("selectedVideoQualityList");
+const selectedVideoQualityCount = document.getElementById("selectedVideoQualityCount");
 const videoCheckSection = document.getElementById("videoCheckSection");
 const videoCheckForm = document.getElementById("videoCheckForm");
 const videoCheckUrl = document.getElementById("videoCheckUrl");
@@ -387,7 +387,9 @@ const videoCheckStatus = document.getElementById("videoCheckStatus");
 const videoCheckResult = document.getElementById("videoCheckResult");
 
 let selectedFiles = [];
+let fileProgressSequence = 0;
 let currentFlowState = "idle";
+let activePrimaryView = "compressor";
 let isCancelled = false;
 let processingFiles = false;
 let lastPatchedVfi = false;
@@ -1136,13 +1138,20 @@ function adjustMobileLayout() {
     const panelLeft = document.querySelector(".panel-left");
     const panelRight = document.querySelector(".panel-right");
     const dropZoneEl = document.getElementById("dropZone");
+    const qualityPanelEl = document.getElementById("selectedVideoQuality");
     if (isMobile) {
         if (dropZoneEl && panelHeader && dropZoneEl.parentNode !== panelHeader) {
             panelHeader.after(dropZoneEl);
         }
+        if (dropZoneEl && qualityPanelEl && qualityPanelEl.previousElementSibling !== dropZoneEl) {
+            dropZoneEl.after(qualityPanelEl);
+        }
     } else {
         if (dropZoneEl && panelRight && dropZoneEl.parentNode !== panelRight) {
             panelRight.insertBefore(dropZoneEl, panelRight.firstChild);
+        }
+        if (dropZoneEl && qualityPanelEl && qualityPanelEl.previousElementSibling !== dropZoneEl) {
+            dropZoneEl.after(qualityPanelEl);
         }
     }
 }
@@ -1513,6 +1522,7 @@ function setPrimaryAppView(view) {
     const historyOnly = view === "history";
     const checkOnly = view === "check";
     const compressorOnly = !historyOnly && !checkOnly;
+    activePrimaryView = compressorOnly ? "compressor" : view;
 
     // History and Check are dedicated views. Compressor controls are restored
     // only when the Compress navigation item is selected.
@@ -1524,6 +1534,7 @@ function setPrimaryAppView(view) {
         queueAndActionsWrapper.hidden = !compressorOnly;
         queueAndActionsWrapper.setAttribute("aria-hidden", String(!compressorOnly));
     }
+    renderSelectedVideoQuality();
 
     setHistorySectionVisible(historyOnly);
 
@@ -1715,25 +1726,22 @@ function setLogCopyVisible(_visible) {
     // System Status/copy-log UI was removed.
 }
 
+function normalizeProgressStage(stage) {
+    return String(stage || "Processing video…")
+        .trim()
+        .replace(/\.\.\.$/, "…");
+}
+
 function setProgress(percent) {
-    const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
-    progressBar.style.setProperty("--progress-scale", String(safePercent / 100));
-    progressTrack.setAttribute("aria-valuenow", String(Math.round(safePercent)));
+    return Math.max(0, Math.min(100, Number(percent) || 0));
 }
 
 function showProgress() {
-    progressTrack.classList.add("active");
-    progressTrack.style.opacity = "1";
+    setProgress(0);
 }
 
 function hideProgress() {
-    setTimeout(() => {
-        progressTrack.style.opacity = "0";
-        setTimeout(() => {
-            setProgress(0);
-            progressTrack.classList.remove("active");
-        }, PROGRESS_FADE_DURATION_MS);
-    }, PROGRESS_HIDE_DELAY_MS);
+    setProgress(0);
 }
 
 function isSupportedFile(file) {
@@ -1764,7 +1772,7 @@ function getOutputFilename() {
     return `@theziess.method_${randomNumber}.mp4`;
 }
 
-function captureVideoFrame(file) {
+function captureVideoFrame(file, maxDimension = MAX_THUMBNAIL_DIMENSION) {
     return new Promise((resolve) => {
         const video = document.createElement("video");
         video.preload = "auto";
@@ -1788,19 +1796,17 @@ function captureVideoFrame(file) {
             resolve(result);
         }
 
-        // Set event handlers BEFORE assigning src to prevent race condition
-        video.onloadeddata = () => {
-            if (settled) return;
-            video.currentTime = 0.1;
-        };
-
-        video.onseeked = () => {
+        const drawCurrentFrame = () => {
             if (settled) return;
             const canvas = document.createElement("canvas");
             const ctx = canvas.getContext("2d");
-            const maxDimension = MAX_THUMBNAIL_DIMENSION;
             let width = video.videoWidth;
             let height = video.videoHeight;
+
+            if (!ctx || width <= 0 || height <= 0) {
+                cleanup(null);
+                return;
+            }
 
             if (width > height) {
                 if (width > maxDimension) {
@@ -1818,9 +1824,27 @@ function captureVideoFrame(file) {
             canvas.height = height;
             ctx.drawImage(video, 0, 0, width, height);
 
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+            const jpegQuality = maxDimension > MAX_THUMBNAIL_DIMENSION ? 0.78 : 0.7;
+            const dataUrl = canvas.toDataURL("image/jpeg", jpegQuality);
             cleanup(dataUrl);
         };
+
+        // Capture a representative frame instead of always using the first frame.
+        video.onloadeddata = () => {
+            if (settled) return;
+            const duration = Number(video.duration);
+            if (Number.isFinite(duration) && duration > 0.05) {
+                const targetTime = Math.min(
+                    Math.max(duration * 0.12, 0.04),
+                    Math.max(0.04, duration - 0.02),
+                );
+                video.currentTime = targetTime;
+            } else {
+                drawCurrentFrame();
+            }
+        };
+
+        video.onseeked = drawCurrentFrame;
 
         video.onerror = () => {
             cleanup(null);
@@ -2462,14 +2486,272 @@ function getStatusLabel(status) {
         {
             pending: "Pending",
             processing: "Processing",
-            success: "Done",
+            success: "រួចរាល់",
             error: "Error",
         }[status] || status
     );
 }
 
+function getVideoFormatLabel(file) {
+    const extension = String(file?.name || "")
+        .split(".")
+        .pop()
+        ?.trim()
+        .toUpperCase();
+    if (extension === "MP4" || extension === "MOV") return extension;
+
+    const mimeType = String(file?.type || "").toLowerCase();
+    if (mimeType.includes("quicktime")) return "MOV";
+    if (mimeType.includes("mp4")) return "MP4";
+    return extension || "VIDEO";
+}
+
+function formatVideoCodec(codec) {
+    const normalized = String(codec || "").trim().toLowerCase();
+    const labels = {
+        avc1: "H.264",
+        avc3: "H.264",
+        hvc1: "H.265",
+        hev1: "H.265",
+        av01: "AV1",
+        vp09: "VP9",
+    };
+    return labels[normalized] || (normalized && normalized !== "unknown"
+        ? normalized.toUpperCase()
+        : "—");
+}
+
+function compactQualityValue(value) {
+    return value === "Unavailable" || !String(value || "").trim() ? "—" : value;
+}
+
+function createFileQualityGrid(item) {
+    const grid = document.createElement("div");
+    grid.className = "file-quality-grid";
+
+    if (item.metadataStatus === "loading") {
+        const loading = document.createElement("span");
+        loading.className = "file-quality-loading";
+        loading.innerHTML = '<i class="ri-loader-4-line" aria-hidden="true"></i><span>កំពុងវិភាគគុណភាពវីដេអូ…</span>';
+        grid.appendChild(loading);
+        return grid;
+    }
+
+    const metadata = item.videoMetadata || {};
+    const specs = [
+        {
+            icon: "ri-aspect-ratio-line",
+            label: "Resolution",
+            value: compactQualityValue(formatCheckedResolution(metadata)),
+        },
+        {
+            icon: "ri-speed-up-line",
+            label: "FPS",
+            value: compactQualityValue(formatCheckedFps(metadata.fps)),
+        },
+        {
+            icon: "ri-dashboard-3-line",
+            label: "Bitrate",
+            value: compactQualityValue(formatCheckedBitrate(metadata.bitrate)),
+        },
+        {
+            icon: "ri-file-reduce-line",
+            label: "File Size",
+            value: formatFileSize(item.size),
+        },
+        {
+            icon: "ri-file-video-line",
+            label: "Type",
+            value: metadata.format || getVideoFormatLabel(item.file),
+        },
+        {
+            icon: "ri-code-box-line",
+            label: "Codec",
+            value: formatVideoCodec(metadata.codec),
+        },
+        {
+            icon: "ri-time-line",
+            label: "Duration",
+            value: compactQualityValue(formatDurationSeconds(metadata.duration)),
+        },
+    ];
+
+    for (const spec of specs) {
+        const chip = document.createElement("span");
+        chip.className = "file-quality-chip";
+        chip.title = `${spec.label}: ${spec.value}`;
+        chip.setAttribute("aria-label", chip.title);
+
+        const icon = document.createElement("i");
+        icon.className = spec.icon;
+        icon.setAttribute("aria-hidden", "true");
+
+        const text = document.createElement("span");
+        const label = document.createElement("small");
+        label.textContent = spec.label;
+        const value = document.createElement("strong");
+        value.textContent = spec.value;
+        text.append(label, value);
+        chip.append(icon, text);
+        grid.appendChild(chip);
+    }
+
+    return grid;
+}
+
+function renderSelectedVideoQuality() {
+    if (!selectedVideoQuality || !selectedVideoQualityList) return;
+
+    const shouldShow = selectedFiles.length > 0 && activePrimaryView === "compressor";
+    selectedVideoQuality.hidden = !shouldShow;
+    selectedVideoQuality.setAttribute("aria-hidden", String(!shouldShow));
+    selectedVideoQualityList.innerHTML = "";
+
+    if (!shouldShow) return;
+
+    if (selectedVideoQualityCount) {
+        selectedVideoQualityCount.textContent = `${selectedFiles.length} video${selectedFiles.length === 1 ? "" : "s"}`;
+    }
+
+    for (const item of selectedFiles) {
+        const card = document.createElement("article");
+        card.className = "selected-video-quality-card";
+
+        const heading = document.createElement("div");
+        heading.className = "selected-video-quality-name";
+        const icon = document.createElement("i");
+        icon.className = "ri-movie-2-line";
+        icon.setAttribute("aria-hidden", "true");
+        const name = document.createElement("strong");
+        name.textContent = item.name;
+        name.title = item.name;
+        heading.append(icon, name);
+
+        const content = document.createElement("div");
+        content.className = "selected-video-quality-content";
+
+        const preview = document.createElement("figure");
+        preview.className = "selected-video-preview";
+        if (item.thumbnailDataUrl?.startsWith(SAFE_THUMBNAIL_PREFIX)) {
+            const image = document.createElement("img");
+            image.src = item.thumbnailDataUrl;
+            image.alt = `Preview frame from ${item.name}`;
+            image.loading = "eager";
+            preview.appendChild(image);
+        } else {
+            const previewState = document.createElement("span");
+            previewState.className = "selected-video-preview-state";
+            const previewIcon = document.createElement("i");
+            previewIcon.className = item.thumbnailStatus === "loading"
+                ? "ri-loader-4-line"
+                : "ri-image-line";
+            previewIcon.setAttribute("aria-hidden", "true");
+            const previewLabel = document.createElement("small");
+            previewLabel.textContent = item.thumbnailStatus === "loading"
+                ? "កំពុងបង្កើតរូប…"
+                : "មិនអាចបង្ហាញរូប";
+            previewState.append(previewIcon, previewLabel);
+            preview.appendChild(previewState);
+        }
+
+        const previewBadge = document.createElement("figcaption");
+        previewBadge.textContent = "VIDEO PREVIEW";
+        preview.appendChild(previewBadge);
+
+        content.append(preview, createFileQualityGrid(item));
+        card.append(heading, content);
+        selectedVideoQualityList.appendChild(card);
+    }
+}
+
+async function loadFileQualityMetadata(item) {
+    item.metadataStatus = "loading";
+
+    try {
+        const buffer = await item.file.arrayBuffer();
+        const inspected = inspectMp4ForTikTok(
+            buffer,
+            item.file.type || getMimeType(item.file),
+        );
+        const duration = Number(inspected.duration) || 0;
+        item.videoMetadata = {
+            width: inspected.width,
+            height: inspected.height,
+            fps: inspected.fps,
+            duration,
+            bitrate: duration > 0 ? (item.size * 8) / duration : 0,
+            codec: inspected.codec,
+            format: getVideoFormatLabel(item.file),
+        };
+        item.metadataStatus = "ready";
+    } catch (error) {
+        const fallback = await getVideoDurationAndResolution(item.file).catch(() => null);
+        const duration = Number(fallback?.duration) || 0;
+        item.videoMetadata = {
+            width: fallback?.width || 0,
+            height: fallback?.height || 0,
+            fps: 0,
+            duration,
+            bitrate: duration > 0 ? (item.size * 8) / duration : 0,
+            codec: null,
+            format: getVideoFormatLabel(item.file),
+        };
+        item.metadataStatus = fallback ? "partial" : "unavailable";
+        console.warn("Unable to read complete local video metadata", error);
+    }
+
+    if (selectedFiles.includes(item)) renderFileList();
+    return item.videoMetadata;
+}
+
+async function loadFilePreview(item) {
+    item.thumbnailStatus = "loading";
+    const thumbnailDataUrl = await captureVideoFrame(
+        item.file,
+        QUALITY_PREVIEW_MAX_DIMENSION,
+    ).catch(() => null);
+    item.thumbnailDataUrl = thumbnailDataUrl?.startsWith(SAFE_THUMBNAIL_PREFIX)
+        ? thumbnailDataUrl
+        : null;
+    item.thumbnailStatus = item.thumbnailDataUrl ? "ready" : "unavailable";
+    if (selectedFiles.includes(item)) renderFileList();
+    return item.thumbnailDataUrl;
+}
+
+function getFileProgressRow(item) {
+    if (!item?.progressId) return null;
+    return Array.from(fileListEl.children).find(
+        (row) => row.dataset.fileProgressId === item.progressId,
+    ) || null;
+}
+
+function updateRenderedFileProgress(item, percent, stage = "") {
+    const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+    const roundedPercent = Math.round(safePercent);
+    item.progress = safePercent;
+    if (stage) item.progressStage = normalizeProgressStage(stage);
+
+    const row = getFileProgressRow(item);
+    if (!row) return;
+
+    const track = row.querySelector(".file-item-progress");
+    const bar = row.querySelector(".file-item-progress-bar");
+    const badge = row.querySelector(".file-badge");
+    const meta = row.querySelector(".file-item-meta");
+
+    bar?.style.setProperty("--file-progress-scale", String(safePercent / 100));
+    track?.setAttribute("aria-valuenow", String(roundedPercent));
+    if (badge && item.status === "processing") badge.textContent = `${roundedPercent}%`;
+    if (meta) {
+        meta.textContent = item.status === "processing"
+            ? `${formatFileSize(item.size)} • កំពុង Compress…`
+            : formatFileSize(item.size);
+    }
+}
+
 function renderFileList() {
     fileListEl.innerHTML = "";
+    renderSelectedVideoQuality();
 
     if (selectedFiles.length === 0) {
         fileListEl.style.display = "none";
@@ -2485,6 +2767,7 @@ function renderFileList() {
         const removeIndex = index;
         const row = document.createElement("div");
         row.className = `file-item status-${item.status}`;
+        row.dataset.fileProgressId = item.progressId;
 
         const checkboxWrapper = document.createElement("label");
         checkboxWrapper.className = "custom-checkbox";
@@ -2518,12 +2801,28 @@ function renderFileList() {
 
         const meta = document.createElement("div");
         meta.className = "file-item-meta";
-        meta.textContent = formatFileSize(item.size);
+        meta.textContent = item.status === "processing"
+            ? `${formatFileSize(item.size)} • កំពុង Compress…`
+            : item.metadataStatus === "loading"
+              ? `${formatFileSize(item.size)} • កំពុងវិភាគ…`
+              : formatFileSize(item.size);
 
         const fileProgressTrack = document.createElement("div");
         fileProgressTrack.className = "file-item-progress";
+        fileProgressTrack.setAttribute("role", "progressbar");
+        fileProgressTrack.setAttribute("aria-label", `Compression progress for ${item.name}`);
+        fileProgressTrack.setAttribute("aria-valuemin", "0");
+        fileProgressTrack.setAttribute("aria-valuemax", "100");
+        fileProgressTrack.setAttribute(
+            "aria-valuenow",
+            String(Math.round(Math.max(0, Math.min(100, Number(item.progress) || 0)))),
+        );
         const fileProgressBar = document.createElement("div");
         fileProgressBar.className = "file-item-progress-bar";
+        fileProgressBar.style.setProperty(
+            "--file-progress-scale",
+            String(Math.max(0, Math.min(100, Number(item.progress) || 0)) / 100),
+        );
         fileProgressTrack.appendChild(fileProgressBar);
 
         body.appendChild(name);
@@ -2544,7 +2843,9 @@ function renderFileList() {
 
         const badge = document.createElement("span");
         badge.className = `file-badge badge-${item.status}`;
-        badge.textContent = getStatusLabel(item.status);
+        badge.textContent = item.status === "processing"
+            ? `${Math.round(Math.max(0, Math.min(100, Number(item.progress) || 0)))}%`
+            : getStatusLabel(item.status);
         right.appendChild(badge);
 
         if (item.status === "success" && item.tiktokUploadBlob) {
@@ -2622,11 +2923,20 @@ async function addFiles(fileList) {
                 );
                 continue;
             }
-            selectedFiles.push({
+            const item = {
+                progressId: `file-progress-${++fileProgressSequence}`,
                 file,
                 name: file.name,
                 size: file.size,
                 status: "pending",
+                progress: 0,
+                progressStage: "Waiting…",
+                metadataStatus: "loading",
+                videoMetadata: null,
+                metadataPromise: null,
+                thumbnailStatus: "loading",
+                thumbnailDataUrl: null,
+                thumbnailPromise: null,
                 patchedBuffer: null,
                 tiktokUploadBlob: null,
                 tiktokUploadMeta: null,
@@ -2634,6 +2944,13 @@ async function addFiles(fileList) {
                 outputName: null,
                 mimeType: null,
                 checked: true,
+            };
+            selectedFiles.push(item);
+            item.metadataPromise = loadFileQualityMetadata(item).finally(() => {
+                item.metadataPromise = null;
+            });
+            item.thumbnailPromise = loadFilePreview(item).finally(() => {
+                item.thumbnailPromise = null;
             });
         }
         if (skipped > 0) logMessage(`${skipped} file(s) skipped.`, "warning");
@@ -2907,11 +3224,16 @@ function getVideoDurationAndResolution(file) {
 async function patchSingleFile(item, { onProgress } = {}) {
     if (isCancelled) throw new Error("Cancelled");
 
+    if (item.metadataPromise) {
+        await item.metadataPromise.catch(() => null);
+    }
+
     onProgress?.({ percent: 2, stage: "Reading video..." });
     const inputBuffer = await item.file.arrayBuffer();
     if (isCancelled) throw new Error("Cancelled");
 
-    const videoInfo = await getVideoDurationAndResolution(item.file).catch(() => null);
+    const videoInfo = item.videoMetadata
+        || await getVideoDurationAndResolution(item.file).catch(() => null);
     if (videoInfo) {
         logMessage(
             `  Source: ${videoInfo.width}x${videoInfo.height} (${videoInfo.width > videoInfo.height ? "landscape" : "portrait"})`,
@@ -3069,6 +3391,8 @@ patchBtn.addEventListener("click", async () => {
     if (failedItems.length > 0) {
         for (const item of failedItems) {
             item.status = "pending";
+            item.progress = 0;
+            item.progressStage = "Waiting…";
             item.checked = true;
             item.patchedBuffer = null;
         }
@@ -3089,6 +3413,8 @@ patchBtn.addEventListener("click", async () => {
             for (const item of selectedFiles) {
                 if (item.status === "success" || item.status === "error") {
                     item.status = "pending";
+                    item.progress = 0;
+                    item.progressStage = "Waiting…";
                     item.checked = true;
                     item.patchedBuffer = null;
                 }
@@ -3121,7 +3447,7 @@ patchBtn.addEventListener("click", async () => {
     patchBtn.disabled = true;
     clearBtn.innerText = "Cancel";
     clearBtn.disabled = false;
-    showProgress();
+    showProgress(`Preparing 1 of ${pendingItems.length}…`);
     await acquireWakeLock();
 
     isCancelled = false;
@@ -3132,10 +3458,16 @@ patchBtn.addEventListener("click", async () => {
             break;
         }
         const item = pendingItems[i];
-        setProgress(Math.round((i / pendingItems.length) * 100));
+        item.progress = 0;
+        item.progressStage = "Preparing video…";
+        setProgress(
+            Math.round((i / pendingItems.length) * 100),
+            `Preparing ${i + 1} of ${pendingItems.length}…`,
+        );
 
         item.status = "processing";
         renderFileList();
+        updateRenderedFileProgress(item, 0, "Preparing video…");
         logMessage(`[${i + 1}/${pendingItems.length}] ${item.name}`, "info");
 
         try {
@@ -3153,7 +3485,14 @@ patchBtn.addEventListener("click", async () => {
             const result = await patchSingleFile(item, {
                 onProgress: ({ percent, stage }) => {
                     const localPercent = Math.max(0, Math.min(100, Number(percent) || 0));
-                    setProgress(fileProgressBase + (localPercent / 100) * fileProgressSpan);
+                    const normalizedStage = normalizeProgressStage(stage || "Processing video…");
+                    setProgress(
+                        fileProgressBase + (localPercent / 100) * fileProgressSpan,
+                        pendingItems.length > 1
+                            ? `${normalizedStage} (${i + 1}/${pendingItems.length})`
+                            : normalizedStage,
+                    );
+                    updateRenderedFileProgress(item, localPercent, normalizedStage);
                     if (stage && stage !== lastPatchStage) {
                         logMessage(`  ${stage}`, stage === "Done" ? "success" : "info");
                         lastPatchStage = stage;
@@ -3165,6 +3504,8 @@ patchBtn.addEventListener("click", async () => {
                 break;
             }
             item.status = "success";
+            item.progress = 100;
+            item.progressStage = "Done";
             item.patchedBuffer = result.finalBuffer;
             item.tiktokUploadBlob = result.tiktokUploadBlob;
             item.tiktokUploadMeta = result.tiktokUploadMeta;
@@ -3269,6 +3610,8 @@ patchBtn.addEventListener("click", async () => {
             }
             if (error?.code === "DAILY_FREE_LIMIT_REACHED") {
                 item.status = "pending";
+                item.progress = 0;
+                item.progressStage = "Waiting…";
                 item.checked = true;
                 logMessage(
                     "  FREE daily limit reached (3/3). Remaining videos were not patched. The limit resets at midnight Cambodia time; PRO, PREMIUM, and MAX are unlimited.",
@@ -3278,12 +3621,15 @@ patchBtn.addEventListener("click", async () => {
             }
             if (error?.code === "SUBSCRIPTION_REQUIRED" || error?.code === "LOGIN_REQUIRED") {
                 item.status = "pending";
+                item.progress = 0;
+                item.progressStage = "Waiting…";
                 item.checked = true;
                 logMessage(`  Access changed: ${error.message}`, "warning");
                 await loadServerSession({ retries: 1 });
                 break;
             }
             item.status = "error";
+            item.progressStage = "Failed";
             item.checked = false;
             const msg =
                 error instanceof Error
@@ -3299,10 +3645,12 @@ patchBtn.addEventListener("click", async () => {
         for (const item of pendingItems) {
             if (item.status === "processing" || item.status === "pending") {
                 item.status = "pending";
+                item.progress = 0;
+                item.progressStage = "Waiting…";
             }
         }
         currentFlowState = "idle";
-        setProgress(0);
+        setProgress(0, "Cancelled");
         hideProgress();
         releaseWakeLock();
         setLogCopyVisible(false);
@@ -3317,7 +3665,12 @@ patchBtn.addEventListener("click", async () => {
     currentFlowState =
         successCount === pendingItems.length ? "completed" : "idle";
     if (successCount === pendingItems.length) setProgress(100);
-    else setProgress(Math.round((successCount / pendingItems.length) * 100));
+    if (successCount !== pendingItems.length) {
+        setProgress(
+            Math.round((successCount / pendingItems.length) * 100),
+            `${successCount}/${pendingItems.length} videos completed`,
+        );
+    }
     releaseWakeLock();
     setLogCopyVisible(true);
     logMessage(

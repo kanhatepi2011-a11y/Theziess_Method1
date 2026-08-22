@@ -49,7 +49,7 @@
 
   <link
     rel="stylesheet"
-    href="style.css?v=20260807-telegram-ui-v2"
+    href="style.css?v=20260822-file-progress-only-v2"
   >
 
   <link
@@ -59,7 +59,7 @@
 
   <link
     rel="stylesheet"
-    href="ux-smooth.css?v=20260817-maintenance-control-v6"
+    href="ux-smooth.css?v=20260822-phone-preview-v5"
   >
 
   <script>
@@ -345,6 +345,25 @@
           </div>
         </div>
 
+        <section
+          class="selected-video-quality"
+          id="selectedVideoQuality"
+          aria-live="polite"
+          hidden
+        >
+          <div class="selected-video-quality-header">
+            <span class="icon-heading">
+              <i class="ri-bar-chart-box-line" aria-hidden="true"></i>
+              <span>គុណភាពវីដេអូ</span>
+            </span>
+            <small id="selectedVideoQualityCount">0 videos</small>
+          </div>
+          <div
+            class="selected-video-quality-list"
+            id="selectedVideoQualityList"
+          ></div>
+        </section>
+
         <div class="queue-and-actions-wrapper">
           <div class="queue-container">
             <div class="queue-header">
@@ -395,22 +414,6 @@
             >
               Login with Telegram, then activate a subscription plan to compress videos.
             </button>
-
-
-            <div
-              class="progress-track"
-              id="progressTrack"
-              role="progressbar"
-              aria-label="Video processing progress"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              aria-valuenow="0"
-            >
-              <div
-                class="progress-bar"
-                id="progressBar"
-              ></div>
-            </div>
           </div>
         </div>
 
@@ -1553,7 +1556,7 @@
 
   <script
     type="module"
-    src="app.js?v=20260817-maintenance-control-v5"
+    src="app.js?v=20260822-phone-preview-v5"
   ></script>
 </body>
 </html>

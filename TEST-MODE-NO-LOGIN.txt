@@ -1,0 +1,17 @@
+THEZIESS METHOD — TEST MODE (NO TELEGRAM LOGIN)
+
+This copy has LOCAL_STANDALONE_MODE enabled in app.js.
+
+- Telegram login is bypassed.
+- Subscription and daily quota checks are bypassed.
+- Video processing still runs locally in the browser with the real Web Worker pipeline.
+- The real project is provided separately and keeps Telegram login, subscription, and quota checks enabled.
+
+Run locally:
+1. Install Node.js 18 or newer.
+2. Open a terminal in this folder.
+3. Run: npm install
+4. Run: npm run dev
+5. Open the local address shown in the terminal.
+
+Do not deploy this TEST copy as the production website.
