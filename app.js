@@ -2484,10 +2484,10 @@ function initializeTikTokPosting() {
 function getStatusLabel(status) {
     return (
         {
-            pending: "Pending",
+            pending: "រង់ចាំ",
             processing: "Processing",
             success: "រួចរាល់",
-            error: "Error",
+            error: "បរាជ័យ",
         }[status] || status
     );
 }
@@ -2832,7 +2832,7 @@ function renderFileList() {
         const icon = document.createElement("div");
         icon.className = "file-item-icon";
         const iconEl = document.createElement("i");
-        iconEl.className = "ri-movie-2-fill";
+        iconEl.className = "ri-file-video-line";
         icon.appendChild(iconEl);
 
         row.appendChild(icon);
@@ -2982,6 +2982,23 @@ function removeFile(index) {
     updatePatchButton();
 }
 
+function setClearButtonMode(mode = "clear") {
+    const isCancel = mode === "cancel";
+    clearBtn.replaceChildren();
+    const icon = document.createElement("i");
+    icon.className = isCancel ? "ri-close-circle-fill" : "ri-delete-bin-fill";
+    icon.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = isCancel ? "បោះបង់" : "សម្អាត";
+    clearBtn.append(icon, label);
+}
+
+function setPatchButtonIcon(iconClass) {
+    const icon = patchBtn.querySelector(".btn-leading-icon");
+    if (!icon) return;
+    icon.className = `${iconClass} patch-access-icon btn-leading-icon`;
+}
+
 function updatePatchButton() {
     const label = patchBtn.querySelector("span");
     const hint = document.getElementById("patchAccessHint");
@@ -2989,6 +3006,7 @@ function updatePatchButton() {
     if (!LOCAL_STANDALONE_MODE && !currentUser) {
         patchBtn.disabled = true;
         patchBtn.dataset.accessState = "login-required";
+        setPatchButtonIcon("ri-lock-2-line");
         patchBtn.title = "Login with Telegram before compressing a video.";
         if (label) label.textContent = "Login Required";
         if (hint) {
@@ -3004,6 +3022,7 @@ function updatePatchButton() {
     if (!LOCAL_STANDALONE_MODE && !hasActiveSubscription()) {
         patchBtn.disabled = true;
         patchBtn.dataset.accessState = "subscription-required";
+        setPatchButtonIcon("ri-vip-crown-line");
         patchBtn.title = "Activate FREE, PRO, PREMIUM, or MAX to unlock video compression.";
         if (label) label.textContent = "Subscription Required";
         if (hint) {
@@ -3019,6 +3038,7 @@ function updatePatchButton() {
     if (isFreeCompressionQuotaExhausted()) {
         patchBtn.disabled = true;
         patchBtn.dataset.accessState = "daily-limit-reached";
+        setPatchButtonIcon("ri-timer-flash-line");
         patchBtn.title = "FREE plan limit reached: 3 compressions per day.";
         if (label) label.textContent = "Daily Limit Reached";
         if (hint) {
@@ -3032,12 +3052,14 @@ function updatePatchButton() {
     }
 
     patchBtn.dataset.accessState = "active";
+    setPatchButtonIcon("ri-file-reduce-line");
     patchBtn.removeAttribute("title");
     if (hint) hint.hidden = true;
     const failedCount = selectedFiles.filter(
         (f) => f.status === "error",
     ).length;
     if (failedCount > 0) {
+        setPatchButtonIcon("ri-restart-line");
         patchBtn.disabled = false;
         const retryLabel =
             failedCount > 1 ? `Retry Failed (${failedCount})` : "Retry Failed";
@@ -3053,6 +3075,7 @@ function updatePatchButton() {
             currentVfi !== lastPatchedVfi || currentRes !== lastPatchedRes;
 
         if (settingsChanged) {
+            setPatchButtonIcon("ri-refresh-line");
             patchBtn.disabled = false;
             patchBtn.querySelector("span").textContent = "Repatch";
         } else {
@@ -3060,12 +3083,14 @@ function updatePatchButton() {
                 (f) => f.status === "success" && f.checked && f.patchedBuffer,
             ).length;
             patchBtn.disabled = checkedCount === 0;
+            if (checkedCount === 0) patchBtn.dataset.accessState = "completed";
+            setPatchButtonIcon(checkedCount > 0 ? "ri-download-2-line" : "ri-check-double-line");
             const label =
                 checkedCount > 1
                     ? `Download Selected (${checkedCount})`
                     : checkedCount > 0
                       ? "Download Selected"
-                      : "Patch Videos";
+                      : "រួចរាល់";
             patchBtn.querySelector("span").textContent = label;
         }
     } else {
@@ -3074,6 +3099,7 @@ function updatePatchButton() {
         ).length;
         patchBtn.disabled =
             pendingCount === 0 || currentFlowState === "patching";
+        setPatchButtonIcon(currentFlowState === "patching" ? "ri-loader-4-line" : "ri-file-reduce-line");
         const label =
             pendingCount > 1
                 ? `Patch Videos (${pendingCount})`
@@ -3445,7 +3471,7 @@ patchBtn.addEventListener("click", async () => {
     setLogCopyVisible(false);
     clearLog();
     patchBtn.disabled = true;
-    clearBtn.innerText = "Cancel";
+    setClearButtonMode("cancel");
     clearBtn.disabled = false;
     showProgress(`Preparing 1 of ${pendingItems.length}…`);
     await acquireWakeLock();
@@ -3654,7 +3680,7 @@ patchBtn.addEventListener("click", async () => {
         hideProgress();
         releaseWakeLock();
         setLogCopyVisible(false);
-        clearBtn.innerText = "Clear";
+        setClearButtonMode("clear");
         logMessage("Video patch cancelled by user.", "warning");
         renderFileList();
         updatePatchButton();
@@ -3679,7 +3705,7 @@ patchBtn.addEventListener("click", async () => {
     );
     hideProgress();
 
-    clearBtn.innerText = "Clear";
+    setClearButtonMode("clear");
     clearBtn.disabled = false;
     renderFileList();
     updatePatchButton();
