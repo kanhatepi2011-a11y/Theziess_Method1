@@ -3405,9 +3405,12 @@ button:disabled,
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 430px) {
   .file-item {
-    grid-template-columns: 18px 40px minmax(0, 1fr);
+    grid-template-columns: 18px 40px minmax(0, 1fr) auto;
+    min-height: 68px;
+    gap: 7px;
+    padding: 8px 7px;
   }
 
   .file-item-icon {
@@ -3416,7 +3419,27 @@ button:disabled,
   }
 
   .file-item-right {
-    grid-column: 2 / -1;
+    grid-column: auto;
+    grid-row: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: fit-content;
+  }
+
+  .file-badge {
+    min-width: 50px;
+    padding: 5px;
+    font-size: 6.5px;
+  }
+
+  .file-remove-btn {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    border-radius: 8px;
   }
 
   .control-actions .btn-row {
@@ -3429,6 +3452,41 @@ button:disabled,
 
   .control-actions .btn-patch > span {
     font-size: 9px;
+  }
+}
+
+@media (max-width: 360px) {
+  .file-item {
+    grid-template-columns: 16px 36px minmax(0, 1fr) auto;
+    gap: 6px;
+    padding: 7px 6px;
+  }
+
+  .file-item-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .file-item-icon > i {
+    width: 25px;
+    height: 25px;
+    font-size: 14px;
+  }
+
+  .file-badge {
+    min-width: 46px;
+    padding-inline: 4px;
+  }
+
+  .file-remove-btn {
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    min-height: 26px;
+  }
+
+  .control-actions .btn-row {
+    grid-template-columns: 84px minmax(0, 1fr);
   }
 }
 
